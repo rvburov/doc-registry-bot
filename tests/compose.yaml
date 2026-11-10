@@ -1,0 +1,11 @@
+# PostgreSQL для тестов: docker compose -f tests/compose.yaml up -d
+# Адрес по умолчанию в tests/conftest.py: localhost:5457, база drb_test.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: drb_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5457:5432"

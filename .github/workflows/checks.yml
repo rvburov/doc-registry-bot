@@ -1,0 +1,60 @@
+name: Проверки
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    name: Оформление, типы, тесты
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: drb_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5457:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5457/drb_test
+      LANG: C.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+          python-version: "3.13"
+      - name: Зависимости
+        run: uv sync --frozen
+      - name: Оформление
+        run: uv run ruff format --check .
+      - name: Стиль и одна дверь в сеть
+        run: uv run ruff check .
+      - name: Типы
+        run: uv run mypy
+      - name: Тесты
+        run: uv run pytest -q -rs | tee pytest.log
+        shell: bash -o pipefail {0}
+      - name: Тесты базы не пропущены
+        run: "! grep -q SKIPPED pytest.log"
+
+  images:
+    name: Сборка образов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Образ бота
+        run: docker build -t doc-registry-bot:ci .
+      - name: Образ копии
+        run: docker build -t doc-registry-backup:ci deploy/backup
+      - name: Бот запускается
+        run: test "$(docker run --rm doc-registry-bot:ci version)" = "$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+      - name: Скрипты без синтаксических ошибок
+        run: bash -n scripts/build.sh deploy/update.sh deploy/backup/backup.sh

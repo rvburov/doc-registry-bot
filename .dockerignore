@@ -1,0 +1,12 @@
+.git
+.venv
+.worktrees
+.pytest_cache
+.mypy_cache
+.ruff_cache
+dist
+deploy
+tests
+docs
+**/__pycache__
+.env

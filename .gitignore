@@ -1,0 +1,25 @@
+# Окружение и кеши
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Сборка
+dist/
+build/
+*.egg-info/
+
+# Рабочие папки агентов
+.worktrees/
+
+# Настройки установки: в них пароли
+.env
+deploy/.env
+deploy/.update-state
+
+# Данные
+*.dump
+*.xlsx
+!tests/**/*.xlsx
