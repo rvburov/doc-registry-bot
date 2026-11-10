@@ -15,7 +15,7 @@ from doc_registry_bot.bot.context import BotConfig, Ctx
 from doc_registry_bot.bot.people import Role, person_of, remember, role_of
 from doc_registry_bot.bot.registration import refused, refused_headed
 from doc_registry_bot.bot.types import Incoming, Messenger, MessengerError, Reply
-from doc_registry_bot.db.models import Pending, ProcessedMessage
+from doc_registry_bot.db.models import Member, Pending, ProcessedMessage
 from doc_registry_bot.registry import markup, message, text
 from doc_registry_bot.registry.names import is_full_name
 
@@ -107,6 +107,9 @@ class Dispatcher:
 
 async def route(ctx: Ctx, incoming: Incoming) -> None:
     role = await role_of(ctx, ctx.sender_id)
+    member = await ctx.session.get(Member, ctx.sender_id)
+    # ФИО для журнала действий; для регистрации его все равно уточняет карточка мессенджера.
+    ctx.sender_fio = member.fio if member else ""
     if not role.can_register:
         ctx.reply(markup.problems(commands.DENIED))
         return

@@ -105,7 +105,9 @@ async def test_access_is_granted_with_the_instruction_after_yes(stand: Stand) ->
     assert member is not None and member.has_access
     greeting = [r for r in stand.replies if r.user_id == STRANGER]
     assert greeting and "Инструкция по регистрации документов" in greeting[0].html
-    assert any(a.action == "Выдача доступа" for a in await stand.audit())
+    [audit] = [a for a in await stand.audit() if a.action == "Выдача доступа"]
+    assert audit.actor_fio == "Админов Андрей Андреевич"
+    assert audit.actor_id == ADMIN
 
 
 async def test_access_without_instruction_for_the_move(stand: Stand) -> None:
