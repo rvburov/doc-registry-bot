@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from doc_registry_bot import importer
 from doc_registry_bot.bot.context import BotConfig
+from doc_registry_bot.bot.types import UserCard
 from doc_registry_bot.registry import schema
 from tests import books
 from tests.stand import ADMIN, REGISTRAR, Stand
@@ -238,3 +239,21 @@ async def test_the_user_file_needs_id_and_fio_columns(stand: Stand) -> None:
     assert report.problems == ["В первой строке нужны столбцы ID и ФИО"]
     report = await importer.load_users(stand.db, b"", "u.xlsx", NOW)
     assert report.problems == ["Нужен файл .csv со столбцами ID и ФИО"]
+
+
+# ── Контакты ──────────────────────────────────────────────────────────────────
+
+
+async def test_contacts_are_listed_by_name_and_load_back_as_users(stand: Stand) -> None:
+    data = importer.contacts_csv(
+        [
+            UserCard(7002, "Петров", "Петр", "Петрович"),
+            UserCard(7001, "Абрамов", "Антон", "Андреевич"),
+        ]
+    )
+    assert data.decode("utf-8-sig") == (
+        "ID;ФИО\r\n7001;Абрамов Антон Андреевич\r\n7002;Петров Петр Петрович\r\n"
+    )
+    report = await importer.load_users(stand.db, data, "контакты.csv", NOW)
+    assert report.ok, report.problems
+    assert report.rows == 2

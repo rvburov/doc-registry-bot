@@ -250,17 +250,33 @@ nano .env
 
 `cp -n` не трогает `.env`, если он уже есть: тогда только проверьте строки по таблице.
 
-| Строка | Что вписать |
-|---|---|
-| `BOT_VERSION` | версию (`1.1.0`) |
-| `MESSENGER_URL` | `http://ИМЯ:8888`: имя службы и порт из шага 4 |
-| `OWNER_IDS` | ваш userId (как на ПК) |
-| `ORG_CODES` | коды организации (как на ПК) |
-| `POSTGRES_PASSWORD` | новый длинный пароль базы сервера (с ПК копировать не обязательно) |
-| `BACKUP_SHARE` | сетевая папка `//сервер/папка`; нет папки — оставьте пустым |
-| `BACKUP_SHARE_USER`, `BACKUP_SHARE_PASSWORD`, `BACKUP_SHARE_DOMAIN` | учетная запись для папки; домен, если нужен |
+Пароль для базы сервера сгенерируйте заранее и скопируйте выведенную строку:
+
+```bash
+openssl rand -hex 24
+```
+
+| Строка | Что вписать | Откуда взять |
+|---|---|---|
+| `BOT_VERSION` | версию, например `1.1.0` | имя файла образов из шага 6 |
+| `MESSENGER_URL` | `http://ИМЯ:ПОРТ` | имя службы и порт из шага 4 |
+| `MESSENGER_NETWORK` | `messenger` | не менять |
+| `OWNER_IDS` | ваш userId | как в `.env` на ПК; или `./contacts.sh \| grep Фамилия` после шага 4 |
+| `ORG_CODES` | коды организации | как в `.env` на ПК |
+| `POSTGRES_DB`, `POSTGRES_USER` | оставить `doc_registry` | |
+| `POSTGRES_PASSWORD` | новый пароль базы сервера | строка от `openssl rand -hex 24`; пароль с ПК не нужен |
+| `BACKUP_TIME`, `BACKUP_KEEP_DAYS` | оставить | |
+| `BACKUP_SHARE` | сетевая папка `//сервер/папка` | у администратора сети; нет папки — сотрите значение |
+| `BACKUP_SHARE_USER`, `BACKUP_SHARE_PASSWORD`, `BACKUP_SHARE_DOMAIN` | учетная запись с правом записи в папку; домен, если нужен | у администратора сети |
 
 Сохраните: `Ctrl+O`, `Enter`, `Ctrl+X`.
+
+**База PostgreSQL** ставится не отдельно, а создается Docker сама в шаге 9
+(`docker compose up -d --wait postgres`): пустая база `POSTGRES_DB`, пользователь `POSTGRES_USER`,
+пароль `POSTGRES_PASSWORD` из этого `.env`. Копия с ПК потом загружается в нее, поэтому пароль на
+сервере свой. Данные лежат в томе Docker `doc-registry-bot_db-data`, стирает их только
+`docker compose down -v`. Строки `POSTGRES_*` заполните до шага 9, в пароле не должно быть `$` и
+пробелов, `.env` не теряйте: без пароля бот к базе не подключится.
 
 ## 8. Образы (на сервере)
 
@@ -380,7 +396,7 @@ cd /opt/doc-registry-bot
 ```
 
 **Пользователи списком:** так же, файлом `пользователи.csv` и командой `./users.sh
-пользователи.csv`. Подробно о замене журнала и списке пользователей: [admin.md](admin.md),
+пользователи.csv`. Заготовку со всеми контактами бота дает `./contacts.sh > контакты.csv`. Подробно о замене журнала и списке пользователей: [admin.md](admin.md),
 раздел 5.
 
 ## 13. Порт 8888 службы мессенджера
@@ -451,6 +467,7 @@ docker compose start bot       # запустить снова
 | `network messenger ... not found` | шаг 4: `docker network create messenger` |
 | `Ошибка: нет файла .env` | вы не в рабочей папке: `cd /opt/doc-registry-bot` |
 | `задайте POSTGRES_PASSWORD в .env` и похожие | заполните строку в `.env` (шаг 7) |
+| бот пишет `password authentication failed` | пароль в `.env` поменяли после шага 9: верните прежний |
 | «Бот перезапускается» после `update.sh` | `docker compose logs bot`: обычно ошибка в `.env` |
 | бот работает, но не отвечает | `docker compose logs bot`; имя и порт в `MESSENGER_URL`; проверка шага 4 |
 | служба мессенджера перестала работать после шага 4 | верните файл: `cp compose.yaml.bak compose.yaml`, `docker compose up -d` |

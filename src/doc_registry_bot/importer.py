@@ -18,6 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from doc_registry_bot.bot.types import UserCard
 from doc_registry_bot.db import journal
 from doc_registry_bot.db.models import AuditEntry, JournalEntry, Member
 from doc_registry_bot.registry import schema, workbook
@@ -76,6 +77,12 @@ async def export_csv(session: AsyncSession, zone: ZoneInfo) -> bytes:
             for e in entries
         ],
     )
+
+
+def contacts_csv(cards: list[UserCard]) -> bytes:
+    """Контакты бота «ID;ФИО» по алфавиту: свой userId для .env и заготовка файла для users.sh."""
+    people = sorted(cards, key=lambda card: (card.fio.casefold(), card.user_id))
+    return csv_bytes(["ID", "ФИО"], [[str(card.user_id), card.fio] for card in people])
 
 
 def fingerprint(data: bytes) -> str:

@@ -6,11 +6,12 @@
 - `check ФАЙЛ` — проверить файл журнала (CSV или Excel), ничего не записывая;
 - `import ФАЙЛ --expect ОТПЕЧАТОК` — заменить журнал файлом, только после резерва;
 - `users ФАЙЛ.csv` — выдать доступ всем из файла (столбцы ID и ФИО);
+- `contacts` — контакты учетной записи бота «ID;ФИО» в стандартный вывод (база не нужна);
 - `version` — версия программы.
 
 Вместо ФАЙЛ в check, import и users можно `-`: файл со стандартного ввода, имя файла (по нему
 определяется формат) — в `--name`. Так команды на сервере передают файл в контейнер без
-подключения папок: deploy/backup.sh, import.sh и users.sh.
+подключения папок: deploy/backup.sh, import.sh, users.sh и contacts.sh.
 """
 
 import asyncio
@@ -170,6 +171,22 @@ async def _users(settings: Settings, name: str, data: bytes) -> int:
     return 0
 
 
+async def _contacts(settings: Settings) -> int:
+    messenger = HttpMessenger(settings.messenger_url)
+    try:
+        cards = await messenger.contacts()
+    except Exception as error:
+        _say(f"Ошибка: {error}")
+        _say(f"Проверьте MESSENGER_URL в .env ({settings.messenger_url}) и сеть messenger.")
+        return 1
+    finally:
+        await messenger.close()
+    sys.stdout.buffer.write(importer.contacts_csv(cards))
+    sys.stdout.flush()
+    _say(f"Контактов: {len(cards)}")
+    return 0
+
+
 def _option(args: list[str], name: str) -> str | None:
     if name in args:
         at = args.index(name)
@@ -204,6 +221,8 @@ def main() -> None:
             return
         asyncio.run(_run(settings))
         return
+    if command == "contacts":
+        raise SystemExit(asyncio.run(_contacts(settings)))
     if command in ("export", "check", "import", "users"):
         if len(args) < 2:
             _say(f"Укажите файл: {command} ФАЙЛ")
@@ -221,7 +240,7 @@ def main() -> None:
         raise SystemExit(asyncio.run(_users(settings, name, data)))
     _say(
         f"Неизвестная команда: {command}. "
-        "Можно: run, migrate, export, check, import, users, version"
+        "Можно: run, migrate, export, check, import, users, contacts, version"
     )
     raise SystemExit(2)
 
