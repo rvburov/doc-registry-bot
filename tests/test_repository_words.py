@@ -4,6 +4,7 @@
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,11 +22,22 @@ _FORBIDDEN = ("esabtrams", "сйебтрамс", "kniltsop")
 
 
 def _text_files() -> list[Path]:
-    files: list[Path] = []
-    for path in ROOT.rglob("*"):
-        if path.is_file() and not SKIP_DIRS.intersection(path.relative_to(ROOT).parts):
-            files.append(path)
-    return files
+    """Файлы проекта: в Git и новые, кроме исключенных .gitignore. Журналы, резервы и .env
+    пользователя (deploy/backups, *.csv, .env) не проверяются: это данные, а не проект."""
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return [
+            path
+            for path in ROOT.rglob("*")
+            if path.is_file() and not SKIP_DIRS.intersection(path.relative_to(ROOT).parts)
+        ]
+    return [ROOT / name for name in listed.decode().split("\0") if name]
 
 
 def _found(text: str) -> list[str]:
@@ -45,7 +57,7 @@ def test_no_third_party_program_names_in_the_repository() -> None:
     for path in _text_files():
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+        except (UnicodeDecodeError, OSError):  # двоичный файл или удален из рабочей копии
             continue
         for word in _found(text):
             hits.append(f"{path.relative_to(ROOT)}: {word}")

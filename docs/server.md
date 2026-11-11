@@ -5,13 +5,13 @@
 проверки:** что уже есть, то не ставится заново. Шаг 2 проверяет весь сервер сразу и говорит,
 какие шаги пропустить.
 
-Команды на сервере выполняются в терминале по SSH, команды «на ПК» — в терминале Ubuntu внутри
-WSL ([pc.md](pc.md)). Где выполнять, написано в начале каждого шага.
+Команды на сервере выполняются в терминале по SSH, команды «на ПК» — в терминале VS Code (Ubuntu,
+WSL), как в [pc.md](pc.md). Где выполнять, написано в начале каждого шага.
 
 | Где | Папка | Что |
 |---|---|---|
-| ПК | `~/doc-registry-bot` | исходный код, сборка |
-| ПК | `~/kd-bot` | бот на ПК (до переезда) |
+| ПК | `E:\doc-registry-bot` = `/mnt/e/doc-registry-bot` | проект: код, сборка |
+| ПК | `E:\doc-registry-bot\deploy` = `/mnt/e/doc-registry-bot/deploy` | бот на ПК (до переезда) |
 | ПК | `E:\bot-files` = `/mnt/e/bot-files` | ваши файлы в Windows (диск E:) |
 | сервер | `/opt/doc-registry-bot` | рабочая папка бота: `.env`, скрипты, резервы |
 | сервер | папка службы мессенджера | ее `compose.yaml` (шаг 4 покажет, где) |
@@ -143,14 +143,23 @@ exit
 
 ## 4. Связь со службой мессенджера (на сервере)
 
-Бот ходит к службе мессенджера через общую сеть Docker `messenger`. Что показала строка
-`Сеть messenger:` в шаге 2:
+Бот и служба мессенджера — два отдельных контейнера. Чтобы бот нашел службу, нужна общая сеть
+Docker `messenger`, а в ней у службы постоянное имя `messenger-api`. Делается до первого запуска
+бота. Служба при этом не останавливается надолго, ее порт и данные не меняются.
+
+Что показала строка `Сеть messenger:` в шаге 2:
 
 | Что видно | Что делать |
 |---|---|
-| имя службы мессенджера | связь уже есть: только узнайте порт (`docker port ИМЯ`, ниже) и переходите к шагу 5 |
-| `Error: No such network` | создайте сеть: `docker network create messenger`, дальше весь шаг |
-| пусто или имени службы нет | дальше весь шаг, кроме создания сети |
+| имя службы мессенджера | проверьте имя `messenger-api` (в конце шага); есть — шаг пропустите |
+| `Error: No such network` | весь шаг |
+| пусто или имени службы нет | весь шаг, кроме создания сети |
+
+Создать сеть (если ее нет):
+
+```bash
+docker network create messenger
+```
 
 Имена контейнеров: `docker ps --format '{{.Names}}'`. Найдите службу мессенджера. Дальше вместо
 `ИМЯ` — ее имя.
@@ -174,37 +183,45 @@ cp compose.yaml compose.yaml.bak
 nano compose.yaml
 ```
 
-Если в файле уже есть строка `- messenger` в описании службы, файл менять не нужно: выполните
-только `docker compose up -d` ниже. Иначе в описании службы добавьте сети (если у службы уже есть
-`networks:`, допишите в него строку
-`- messenger`), а в конце файла — раздел `networks`:
+В описании службы добавьте раздел `networks` (как ниже), а в конце файла — раздел `networks` с
+сетью `messenger`:
 
 ```yaml
 services:
   ИМЯ_СЛУЖБЫ_В_ФАЙЛЕ:
     # ... все, что уже есть, не трогать, строку ports с 8888 оставить
     networks:
-      - default
-      - messenger
+      default:
+      messenger:
+        aliases:
+          - messenger-api
 
 networks:
   messenger:
     external: true
 ```
 
-`default` обязателен: без него служба потеряет связь с соседями по своему `compose`. Если раздел
-`networks:` в конце файла уже есть, добавьте в него только `messenger` с `external: true`.
+- `default:` обязателен: без него служба потеряет связь с соседями по своему `compose`.
+- Если у службы уже есть `networks:` списком (строки вида `- имя`), перепишите его в виде выше:
+  каждое имя с двоеточием в конце (`имя:`), и добавьте `messenger` с `aliases`.
+- Если раздел `networks:` в конце файла уже есть, добавьте в него только `messenger` с
+  `external: true`.
 
-Сохраните (`Ctrl+O`, `Enter`, `Ctrl+X`) и примените:
+Сохраните (`Ctrl+O`, `Enter`, `Ctrl+X`), проверьте и примените:
 
 ```bash
+docker compose config -q
 docker compose up -d
 ```
+
+`docker compose config -q` ничего не выводит, если файл записан верно. Ошибка — исправьте файл
+или верните прежний: `cp compose.yaml.bak compose.yaml`. `docker compose up -d` пересоздает
+контейнер службы: на несколько секунд она перестает отвечать.
 
 **Служба запущена без compose (пусто):**
 
 ```bash
-docker network connect messenger ИМЯ
+docker network connect --alias messenger-api messenger ИМЯ
 ```
 
 Если контейнер службы когда-нибудь пересоздадут (обновят), повторите эту команду.
@@ -213,9 +230,11 @@ docker network connect messenger ИМЯ
 
 ```bash
 docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}}'
+docker inspect -f '{{json .NetworkSettings.Networks.messenger.Aliases}}' ИМЯ
 ```
 
-В выводе есть имя службы.
+Первая показывает имя службы, вторая — список имен, в котором есть `"messenger-api"`. Имя
+контейнера после `docker compose up -d` могло поменяться: возьмите его снова из `docker ps`.
 
 Порт 8888 службы остается открытым: к службе могут подключаться другие программы с компьютеров
 сети. Боту порт не нужен. Как посмотреть, кто подключен, и как закрыть порт потом, — шаг 13.
@@ -232,7 +251,7 @@ sudo chown "$USER": /opt/doc-registry-bot
 ## 6. Файлы бота на сервер (на ПК)
 
 ```bash
-cd ~/doc-registry-bot
+cd /mnt/e/doc-registry-bot
 scp dist/doc-registry-bot-1.1.0.tar.gz dist/*.sh dist/compose.yaml dist/.env.example admin@10.0.0.5:/opt/doc-registry-bot/
 ```
 
@@ -259,7 +278,7 @@ openssl rand -hex 24
 | Строка | Что вписать | Откуда взять |
 |---|---|---|
 | `BOT_VERSION` | версию, например `1.1.0` | имя файла образов из шага 6 |
-| `MESSENGER_URL` | `http://ИМЯ:ПОРТ` | имя службы и порт из шага 4 |
+| `MESSENGER_URL` | `http://messenger-api:8888` | имя из шага 4; если порт в шаге 4 не `8888` — свой порт |
 | `MESSENGER_NETWORK` | `messenger` | не менять |
 | `OWNER_IDS` | ваш userId | как в `.env` на ПК; или `./contacts.sh \| grep Фамилия` после шага 4 |
 | `ORG_CODES` | коды организации | как в `.env` на ПК |
@@ -297,7 +316,7 @@ docker load -i doc-registry-bot-1.1.0.tar.gz
 **На ПК** остановите бота и сделайте копию:
 
 ```bash
-cd ~/kd-bot
+cd /mnt/e/doc-registry-bot/deploy
 docker compose stop bot
 ./backup.sh
 ```
@@ -429,7 +448,7 @@ sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' ИМЯ)" -n ss -tn state e
 На ПК:
 
 ```bash
-cd ~/doc-registry-bot
+cd /mnt/e/doc-registry-bot
 git pull
 scripts/build.sh
 scp dist/doc-registry-bot-1.2.0.tar.gz dist/*.sh dist/compose.yaml admin@10.0.0.5:/opt/doc-registry-bot/

@@ -10,9 +10,10 @@
 
 ## 1. Что нужно
 
-- **ПК (Windows):** WSL с Ubuntu 24.04, Docker Desktop с интеграцией WSL, в Ubuntu `git` и
-  `uv`, клон репозитория в `~/doc-registry-bot`. Проверка и установка по шагам — [pc.md](pc.md),
-  шаги 0–4: что уже стоит, не ставится заново.
+- **ПК (Windows):** WSL с Ubuntu, Docker (тот же, в котором работает служба мессенджера), в
+  Ubuntu `git` и `uv`. Проект лежит на диске Windows (`E:\doc-registry-bot`), открыт в VS Code,
+  команды — в терминале VS Code (Ubuntu). Проверка и установка по шагам — [pc.md](pc.md), шаги
+  0–4: что уже стоит, не ставится заново.
 - **Сервер:** виртуальная машина Ubuntu с доступом по SSH и интернетом для установки Docker и
   обновлений Ubuntu. Служба мессенджера работает на этом же сервере в своем Docker.
 - **Сведения:** ваш числовой `userId` в мессенджере, коды организации, сетевая папка для копий
@@ -21,7 +22,7 @@
 ## 2. Сборка на ПК
 
 ```bash
-cd ~/doc-registry-bot
+cd /mnt/e/doc-registry-bot
 git pull
 scripts/build.sh
 ```
@@ -61,24 +62,26 @@ sudo timedatectl set-timezone Europe/Moscow
 docker network create messenger
 ```
 
-В `compose` службы мессенджера подключите ее к этой сети и уберите публикацию порта 8888 наружу:
-у службы нет авторизации, и кто до нее достучится, пишет от имени бота.
+В `compose` службы мессенджера подключите ее к этой сети под постоянным именем `messenger-api`
+(подробно, с проверками и для службы без `compose`, — [server.md](server.md), шаг 4):
 
 ```yaml
 services:
   <имя службы>:
-    # строку ports с 8888 удалить
+    # ... все, что уже есть, строку ports с 8888 оставить
     networks:
-      - default
-      - messenger
+      default:
+      messenger:
+        aliases:
+          - messenger-api
 
 networks:
   messenger:
     external: true
 ```
 
-Затем перезапустите службу мессенджера (`docker compose up -d` в ее папке) и запишите имя ее
-контейнера: `docker ps --format '{{.Names}}'`.
+Затем `docker compose config -q` и `docker compose up -d` в ее папке. В `.env` бота:
+`MESSENGER_URL=http://messenger-api:8888`.
 
 Папка бота и файлы с ПК:
 
