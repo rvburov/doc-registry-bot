@@ -177,7 +177,7 @@ async def _answer_pending(
         return True
     if kind in ("register", "batch", "file"):
         await registration.confirm(ctx, kind, payload)
-    elif kind in ("delete", "edit"):
+    elif kind in ("delete", "edit", "delete_many"):
         await documents.confirm(ctx, kind, payload)
     return True
 

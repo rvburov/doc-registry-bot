@@ -88,6 +88,12 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
     """Просмотр, удаление или изменение. Ожидающая операция уже проверена вызывающим."""
     problems: list[str] = []
     number_text = text.value(values, message.NUMBER_KEY)
+    if "," in number_text:
+        if action == DELETE:
+            await _delete_many(ctx, number_text, values)
+        else:
+            refused(ctx, f"Номер: для действия «{action}» указывается один номер")
+        return
     number = message.exact_number(number_text) if number_text else None
     if not number_text:
         problems.append("Номер: не указан номер")
@@ -119,11 +125,7 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
         if not changes and not problems:
             problems.append("Изменение: укажите хотя бы одно поле, Наименование или Проект")
     else:
-        for field, _ in values:
-            if not text.same_name(field, message.ACTION_KEY) and not text.same_name(
-                field, message.NUMBER_KEY
-            ):
-                problems.append(f"{field}: для действия «{action}» нужны только Действие и Номер")
+        problems.extend(_extra_fields(action, values))
     if problems:
         refused(ctx, "\n".join(problems))
         return
@@ -166,8 +168,91 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
     ctx.reply(f"{preview}\n\n{markup.PROMPT}")
 
 
+def _extra_fields(action: str, values: list[tuple[str, str]]) -> list[str]:
+    return [
+        f"{field}: для действия «{action}» нужны только Действие и Номер"
+        for field, _ in values
+        if not text.same_name(field, message.ACTION_KEY)
+        and not text.same_name(field, message.NUMBER_KEY)
+    ]
+
+
+async def _delete_many(ctx: Ctx, number_text: str, values: list[tuple[str, str]]) -> None:
+    """Удаление нескольких документов одним подтверждением. Не нашелся хоть один — ничего."""
+    problems = _extra_fields(DELETE, values)
+    parts = [part.strip() for part in number_text.split(",")]
+    if len(parts) > message.MAX_BATCH:
+        problems.append(f"Номер: в одном запросе не больше {message.MAX_BATCH} номеров")
+    numbers: list[str] = []
+    for raw in parts:
+        exact = message.exact_number(raw) if raw else None
+        if not raw:
+            problems.append("Номер: в списке пустой номер")
+        elif exact is None:
+            problems.append(f"Номер: {raw}: нужен полный номер документа или исполнения")
+        elif exact not in numbers:
+            numbers.append(exact)
+    if problems:
+        refused(ctx, "\n".join(problems))
+        return
+    cards: list[Card] = []
+    missing: list[str] = []
+    for number in numbers:
+        entry = await journal.find(ctx.session, number)
+        if entry is None:
+            missing.append(f"Номер: документ {number} не найден")
+        else:
+            cards.append(card_of(ctx, entry))
+    if missing:
+        refused(ctx, "\n".join([*missing, "Ничего не удалено"]))
+        return
+    if len(cards) == 1:
+        await pending.put(ctx, "delete", {"card": asdict(cards[0]), "changes": {}})
+        preview = bold("Подтвердите удаление документа:") + "\n" + cards[0].html()
+        ctx.reply(f"{preview}\n\n{markup.PROMPT}")
+        return
+    await pending.put(ctx, "delete_many", {"cards": [asdict(card) for card in cards]})
+    ctx.reply(
+        bold(f"Подтвердите удаление документов: {len(cards)}")
+        + "\n"
+        + _short_list(cards)
+        + "\n\n"
+        + markup.PROMPT
+    )
+
+
+def _short_list(cards: list[Card]) -> str:
+    return "\n".join(
+        f"{index}. {bold(escape(card.number))}: {escape(card.name)}, проект {escape(card.project)}"
+        for index, card in enumerate(cards, start=1)
+    )
+
+
+async def _confirm_delete_many(ctx: Ctx, payload: dict[str, Any]) -> None:
+    before = [Card(**item) for item in payload["cards"]]
+    entries: list[JournalEntry] = []
+    for card in before:
+        entry = await ctx.session.get(JournalEntry, card.entry_id, with_for_update=True)
+        if entry is None or card_of(ctx, entry) != card:
+            refused_headed(
+                ctx,
+                "Документы изменились после запроса подтверждения. Удаление не выполнено. "
+                "Отправьте запрос заново",
+            )
+            return
+        entries.append(entry)
+    for entry, card in zip(entries, before, strict=True):
+        await ctx.session.delete(entry)
+        ctx.audit("Удаление записи", _plain_card(card))
+    await ctx.session.flush()
+    ctx.reply(bold(f"Удалено: {len(before)}") + "\n" + _short_list(before))
+
+
 async def confirm(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
     """Ответ «Да» на удаление или изменение."""
+    if kind == "delete_many":
+        await _confirm_delete_many(ctx, payload)
+        return
     before = Card(**payload["card"])
     changes: dict[str, str] = payload["changes"]
     entry = await ctx.session.get(JournalEntry, before.entry_id, with_for_update=True)

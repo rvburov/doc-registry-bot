@@ -26,6 +26,7 @@ docker image inspect postgres:16 >/dev/null 2>&1 || docker pull postgres:16
 mkdir -p dist
 out="dist/doc-registry-bot-$version.tar.gz"
 docker save "doc-registry-bot:$version" "doc-registry-backup:$version" postgres:16 | gzip > "$out"
-cp deploy/compose.yaml deploy/update.sh deploy/.env.example dist/
+cp deploy/compose.yaml deploy/update.sh deploy/backup.sh deploy/import.sh deploy/users.sh \
+  deploy/.env.example dist/
 echo "Собрано: $out"
-echo "На сервер: $out, dist/compose.yaml, dist/update.sh (и .env.example при первой установке)."
+echo "На сервер: $out и файлы dist/*.sh, dist/compose.yaml (.env.example при первой установке)."

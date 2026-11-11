@@ -266,6 +266,86 @@ async def test_a_document_changed_after_the_preview_is_not_deleted(stand: Stand)
     assert await stand.designations() == ["АБВГ.301121.001"]
 
 
+async def test_several_numbers_are_deleted_with_one_yes(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001", "АБВГ.301121.002", "АБВГ.301121.003")
+    preview = await stand.say(
+        REGISTRAR, "Действие: Удаление\nНомер: АБВГ.301121.001, абвг.301121.003, АБВГ.301121.001"
+    )
+    assert preview == (
+        "<b>Подтвердите удаление документов: 2</b>\n"
+        "1. <b>АБВГ.301121.001</b>: Кронштейн, проект Машина\n"
+        "2. <b>АБВГ.301121.003</b>: Кронштейн, проект Машина\n\n" + markup.PROMPT
+    )
+    assert await stand.designations() == [
+        "АБВГ.301121.001",
+        "АБВГ.301121.002",
+        "АБВГ.301121.003",
+    ]
+    done = await stand.say(REGISTRAR, "Да")
+    assert done.startswith("<b>Удалено: 2</b>\n1. <b>АБВГ.301121.001</b>")
+    assert await stand.designations() == ["АБВГ.301121.002"]
+    deleted = [a for a in await stand.audit() if a.action == "Удаление записи"]
+    assert len(deleted) == 2
+
+
+async def test_nothing_is_deleted_when_one_number_is_missing(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001", "АБВГ.301121.002")
+    answer = await stand.say(
+        REGISTRAR,
+        "Действие: Удаление\nНомер: АБВГ.301121.001, АБВГ.301121.007, АБВГ.301121.009",
+    )
+    assert markup.plain(answer) == (
+        "Номер: документ АБВГ.301121.007 не найден\n"
+        "Номер: документ АБВГ.301121.009 не найден\n"
+        "Ничего не удалено"
+    )
+    assert await stand.designations() == ["АБВГ.301121.001", "АБВГ.301121.002"]
+    assert "Регистрация" not in await stand.say(REGISTRAR, "Да")
+
+
+async def test_a_wrong_number_in_the_list_refuses_the_whole_deletion(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001")
+    answer = await stand.say(REGISTRAR, "Действие: Удаление\nНомер: АБВГ.301121.001, АБВГ, ")
+    plain = markup.plain(answer)
+    assert "Номер: АБВГ: нужен полный номер документа или исполнения" in plain
+    assert "Номер: в списке пустой номер" in plain
+    assert await stand.designations() == ["АБВГ.301121.001"]
+
+
+async def test_one_changed_document_stops_the_whole_deletion(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001", "АБВГ.301121.002")
+    await stand.say(REGISTRAR, "Действие: Удаление\nНомер: АБВГ.301121.001, АБВГ.301121.002")
+    async with stand.db() as session, session.begin():
+        from doc_registry_bot.db import journal
+
+        entry = await journal.find(session, "АБВГ.301121.002")
+        assert entry is not None
+        entry.name = "Другой"
+        entry.version += 1
+    answer = await stand.say(REGISTRAR, "Да")
+    assert answer.startswith("<b>Документы изменились после запроса подтверждения.</b>")
+    assert await stand.designations() == ["АБВГ.301121.001", "АБВГ.301121.002"]
+
+
+async def test_a_new_request_waits_for_the_answer_on_several_deletions(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001", "АБВГ.301121.002")
+    await stand.say(REGISTRAR, "Действие: Удаление\nНомер: АБВГ.301121.001, АБВГ.301121.002")
+    answer = await stand.say(REGISTRAR, registration())
+    assert "Ожидается подтверждение: Удаление, документов: 2" in markup.plain(answer)
+    assert await stand.say(REGISTRAR, "Нет")
+    assert len(await stand.designations()) == 2
+
+
+async def test_view_and_edit_take_one_number(stand: Stand) -> None:
+    await stand.add("АБВГ.301121.001", "АБВГ.301121.002")
+    view = await stand.say(REGISTRAR, "Действие: Просмотр\nНомер: АБВГ.301121.001, АБВГ.301121.002")
+    assert markup.plain(view) == "Номер: для действия «Просмотр» указывается один номер"
+    edit = await stand.say(
+        REGISTRAR, "Действие: Изменение\nНомер: АБВГ.301121.001, АБВГ.301121.002\nПроект: Х"
+    )
+    assert markup.plain(edit) == "Номер: для действия «Изменение» указывается один номер"
+
+
 async def test_view_accepts_only_action_and_number(stand: Stand) -> None:
     answer = await stand.say(REGISTRAR, "Действие: Просмотр\nНомер: АБВГ.301121.001\nПроект: Х")
     assert "Проект: для действия «Просмотр» нужны только Действие и Номер" in markup.plain(answer)

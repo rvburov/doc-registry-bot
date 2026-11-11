@@ -30,6 +30,8 @@
 - Администраторы выдают и снимают доступ, делают выгрузку журнала в CSV, отправляют сообщения с
   файлами. Владелец (OWNER_IDS в `.env`) назначает администраторов.
 - Сообщения, пришедшие, пока бот не работал, он дочитывает при подключении (до 24 часов).
+- На сервере: `./backup.sh` (резерв журнала и базы), `./import.sh ФАЙЛ` (замена всего журнала,
+  только после свежего резерва), `./users.sh ФАЙЛ` (доступ списком).
 
 ## Разработка
 
@@ -50,6 +52,6 @@ uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pyt
 | `src/doc_registry_bot/db/`, `migrations/` | таблицы и миграции Alembic |
 | `src/doc_registry_bot/messenger/` | единственная дверь в сеть: HTTP API и поток STOMP службы мессенджера |
 | `src/doc_registry_bot/service.py` | очередь, дочитывание, уведомления владельцу, чистка |
-| `src/doc_registry_bot/importer.py` | перенос журнала из выгрузки SmartBase |
-| `deploy/` | `compose.yaml`, `update.sh`, `.env.example`, образ ночной копии |
+| `src/doc_registry_bot/importer.py` | выгрузка журнала, замена журнала из файла после резерва, доступ из файла |
+| `deploy/` | `compose.yaml`, `update.sh`, `backup.sh`, `import.sh`, `users.sh`, `.env.example`, образ ночной копии |
 | `tests/` | тесты: логика, сценарии бота на настоящем PostgreSQL, подделки мессенджера |

@@ -18,8 +18,12 @@ build/
 .env
 deploy/.env
 deploy/.update-state
+deploy/backups/
+backups/
 
 # Данные
 *.dump
 *.xlsx
+*.csv
+!tests/**/*.csv
 !tests/**/*.xlsx

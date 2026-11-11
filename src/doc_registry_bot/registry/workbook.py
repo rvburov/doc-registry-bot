@@ -1,14 +1,16 @@
-"""Чтение книги Excel со строками журнала.
+"""Чтение книги Excel или файла CSV со строками журнала.
 
 Два случая:
 - книга вложением в сообщении бота: ограничения по размеру, строкам и ячейкам, ФИО берется у
   отправителя, столбец ФИО необязателен и не читается, «Дата регистрации» не читается;
-- выгрузка журнала из SmartBase для переноса (команда import): читаются все восемь столбцов.
+- журнал целиком для замены на сервере (команда import, CSV или Excel): читаются все восемь
+  столбцов.
 
 Лист — ПЕРВЫЙ, а не по имени: файл делают выгрузкой или вручную, и имя листа у каждого свое.
 Номер строки — настоящий номер в книге: по нему человек ищет ошибку у себя в файле.
 """
 
+import csv
 import io
 import os
 import zipfile
@@ -155,14 +157,66 @@ def read_rows(data: bytes, *, max_rows: int | None, sender_fio: str | None) -> l
                 by_row.setdefault(row_number, {})[column] = value
     finally:
         book.close()
+    return _book_rows(by_row, f"На листе «{title}»", max_rows=max_rows, sender_fio=sender_fio)
 
+
+def decode_text(data: bytes) -> str:
+    """Текст файла: UTF-8 (с меткой или без), иначе Windows-1251 — так сохраняет CSV
+    табличный редактор на русской Windows."""
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp1251")
+
+
+def table_cells(data: bytes) -> dict[int, dict[int, str]]:
+    """Непустые ячейки CSV по строкам и столбцам (с единицы, как в книге).
+
+    Разделитель — тот из «;», «,» и табуляции, которого больше всего в первой строке.
+    """
+    content = decode_text(data)
+    first = next((line for line in content.splitlines() if line.strip()), "")
+    delimiter = max(";,\t", key=first.count)
+    cells: dict[int, dict[int, str]] = {}
+    reader = csv.reader(io.StringIO(content, newline=""), delimiter=delimiter)
+    for row in reader:
+        values = {
+            column: value.strip() for column, value in enumerate(row, start=1) if value.strip()
+        }
+        if values:
+            cells[reader.line_num] = values
+    return cells
+
+
+def read_csv(data: bytes, *, max_rows: int | None, sender_fio: str | None) -> list[BookRow]:
+    """Строки CSV с шапкой журнала в первой непустой строке."""
+    try:
+        cells = table_cells(data)
+    except (csv.Error, UnicodeDecodeError) as error:
+        raise WorkbookError(f"Не удалось прочитать CSV: {error}.") from error
+    return _book_rows(cells, "В файле", max_rows=max_rows, sender_fio=sender_fio)
+
+
+def read_table(data: bytes, name: str, *, sender_fio: str | None = None) -> list[BookRow]:
+    """Журнал из файла по расширению: CSV или книга Excel."""
+    extension = os.path.splitext(name)[1].lower()
+    if extension == ".csv":
+        return read_csv(data, max_rows=None, sender_fio=sender_fio)
+    if extension in EXTENSIONS:
+        return read_rows(data, max_rows=None, sender_fio=sender_fio)
+    raise WorkbookError(f"Нужен файл .csv, .xlsx или .xlsm, а указан «{extension or name}».")
+
+
+def _book_rows(
+    by_row: dict[int, dict[int, str]], where: str, *, max_rows: int | None, sender_fio: str | None
+) -> list[BookRow]:
     if not by_row:
-        raise WorkbookError(f"Лист «{title}» пустой.")
+        raise WorkbookError(f"{where} нет данных.")
     numbers = sorted(by_row)
     header_row = by_row[numbers[0]]
     width = max(header_row)
     header = [header_row.get(column, "") for column in range(1, width + 1)]
-    at = _header(header, title, from_sender=sender_fio is not None)
+    at = _header(header, where, from_sender=sender_fio is not None)
 
     result: list[BookRow] = []
     for number in numbers[1:]:
@@ -189,11 +243,11 @@ def read_rows(data: bytes, *, max_rows: int | None, sender_fio: str | None) -> l
             )
         )
     if not result:
-        raise WorkbookError(f"На листе «{title}» только заголовок, строк с номерами нет.")
+        raise WorkbookError(f"{where} только заголовок, строк с номерами нет.")
     return result
 
 
-def _header(header: list[str], sheet_name: str, *, from_sender: bool) -> list[int]:
+def _header(header: list[str], where: str, *, from_sender: bool) -> list[int]:
     """Номера столбцов журнала в шапке (с нуля) в порядке журнала."""
     cells = [(name, index) for index, name in enumerate(header)]
     if from_sender:
@@ -202,7 +256,7 @@ def _header(header: list[str], sheet_name: str, *, from_sender: bool) -> list[in
         cells.append((schema.FIO, -1))
     found, problem = schema.find(cells, lambda cell: cell[0])
     if found is None:
-        raise WorkbookError(f"На листе «{sheet_name}» {problem}.")
+        raise WorkbookError(f"{where} {problem}.")
     return [index for _, index in found]
 
 

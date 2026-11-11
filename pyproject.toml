@@ -1,6 +1,6 @@
 [project]
 name = "doc-registry-bot"
-version = "1.0.0"
+version = "1.1.0"
 description = "Регистрация КД: бот в программе-мессенджере выдает обозначения по ГОСТ 2.201-80 и ведет журнал"
 readme = "README.md"
 requires-python = ">=3.13"

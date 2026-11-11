@@ -5,8 +5,6 @@
 и перед любой командой о людях бот показывает, кого нашел, и ждет подтверждения.
 """
 
-import csv
-import io
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -14,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from doc_registry_bot import importer
 from doc_registry_bot.bot import pending
 from doc_registry_bot.bot.context import Ctx
 from doc_registry_bot.bot.people import (
@@ -32,7 +31,7 @@ from doc_registry_bot.bot.registration import refused, refused_headed
 from doc_registry_bot.bot.types import Attachment, MessengerError
 from doc_registry_bot.db import journal
 from doc_registry_bot.db.models import AuditEntry
-from doc_registry_bot.registry import instructions, markup, schema, text
+from doc_registry_bot.registry import instructions, markup, text
 from doc_registry_bot.registry.markup import bold, escape
 
 HELP = "помощь"
@@ -399,39 +398,10 @@ async def _admins(
 # ── Выгрузки ──────────────────────────────────────────────────────────────────
 
 
-def _csv(header: list[str], rows: list[list[str]]) -> bytes:
-    """CSV для табличного редактора: UTF-8 с меткой и разделитель «;»."""
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
-    writer.writerow(header)
-    writer.writerows(rows)
-    return buffer.getvalue().encode("utf-8-sig")
-
-
-async def journal_csv(ctx: Ctx) -> bytes:
-    entries = await journal.all_entries(ctx.session)
-    return _csv(
-        list(schema.COLUMNS),
-        [
-            [
-                e.name,
-                e.designation,
-                e.fio,
-                ctx.local(e.registered_at),
-                e.project,
-                e.accounting,
-                e.first_use,
-                e.summary,
-            ]
-            for e in entries
-        ],
-    )
-
-
 async def _export(
     ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int
 ) -> None:
-    data = await journal_csv(ctx)
+    data = await importer.export_csv(ctx.session, ctx.config.zone)
     count = await journal.count(ctx.session)
     stamp = ctx.now.astimezone(ctx.config.zone).strftime("%Y-%m-%d")
     ctx.audit("Выгрузка журнала", f"записей: {count}")
@@ -448,7 +418,7 @@ async def _audit(ctx: Ctx, command: Command, role: Role, files: list[int], messa
             select(AuditEntry).where(AuditEntry.at >= since).order_by(AuditEntry.at)
         )
     )
-    data = _csv(
+    data = importer.csv_bytes(
         ["Когда", "Кто", "ID", "Действие", "Подробности"],
         [[ctx.local(r.at), r.actor_fio, str(r.actor_id), r.action, r.details] for r in rows],
     )
@@ -565,6 +535,12 @@ def pending_refusal(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
             ctx,
             f"Ожидается подтверждение: {action}, {number}. Подтвердите: Да или Нет. "
             "Для нового запроса сначала ответьте Нет",
+        )
+    elif kind == "delete_many":
+        refused(
+            ctx,
+            f"Ожидается подтверждение: Удаление, документов: {len(payload['cards'])}. "
+            "Подтвердите: Да или Нет. Для нового запроса сначала ответьте Нет",
         )
     elif kind == GRANT:
         refused(ctx, "Ожидается ответ: Да, Без инструкции или Нет")

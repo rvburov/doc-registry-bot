@@ -1,5 +1,4 @@
-"""Служба: дочитывание за время простоя, уведомления владельцу, отчет о копии, чистка, загрузка
-журнала из выгрузки SmartBase."""
+"""Служба: дочитывание за время простоя, уведомления владельцу, отчет о копии, чистка."""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -11,10 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.bot.types import HistoryMessage
 from doc_registry_bot.db.models import AuditEntry
-from doc_registry_bot.importer import import_journal
 from doc_registry_bot.registry import markup
 from doc_registry_bot.service import LAST_CTIME, BotService, incoming_of, server_time
-from tests import books
 from tests.stand import OWNER, REGISTRAR, Stand, registration
 
 pytestmark = pytest.mark.asyncio
@@ -155,40 +152,3 @@ async def test_cleaning_keeps_twelve_months_of_actions(stand: Stand, config: Bot
         session.add(AuditEntry(at=NOW - timedelta(days=10), actor_id=1, action="свежее"))
     await service_of(stand, config).clean()
     assert [a.action for a in await stand.audit()] == ["свежее"]
-
-
-# ── Загрузка журнала ─────────────────────────────────────────────────────────
-
-
-async def test_the_journal_export_is_imported_once_with_old_dates(
-    db: async_sessionmaker[AsyncSession], config: BotConfig
-) -> None:
-    def fill(sheet: object) -> None:
-        rows = [
-            ["Вал", "АБВГ.301121.001", "Иванов Иван Иванович", "01.02.2024 10:30", "Машина"],
-            ["Ось", "АБВГ.301121.002-01", "Петров Петр Петрович", "", "Станок"],
-        ]
-        for line, values in enumerate(rows, start=2):
-            for column, value in enumerate(values, start=1):
-                if value:
-                    sheet.cell(row=line, column=column, value=value)  # type: ignore[attr-defined]
-
-    data = books.create_sheet(fill, [*books.schema.COLUMNS, "Письмо"])
-    report = await import_journal(db, data, config.zone, NOW)
-    assert report.ok, report.problems
-    assert report.rows == 2
-    again = await import_journal(db, data, config.zone, NOW)
-    assert not again.ok
-    assert "уже не пустой" in again.problems[0]
-
-
-async def test_duplicates_in_the_export_stop_the_import(
-    db: async_sessionmaker[AsyncSession], config: BotConfig
-) -> None:
-    data = books.create(
-        books.Row(2, number="АБВГ.301121.001"), books.Row(3, number="абвг.301121.001")
-    )
-    report = await import_journal(db, data, config.zone, NOW)
-    assert not report.ok
-    assert "Строка 3: «абвг.301121.001» уже есть в строке 2" in report.problems
-    assert "Строка 2: не разобрана дата «дата из файла не используется»" in report.problems
