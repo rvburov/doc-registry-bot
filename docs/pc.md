@@ -1,23 +1,85 @@
 # Регистрация КД: бот на ПК (Windows, WSL, Docker Desktop)
 
-Пошагово: установка, сборка, первый запуск, загрузка журнала, выгрузка файлов, остановка и
-обновление. Все команды, кроме одной в шаге 1, выполняются в терминале Ubuntu внутри WSL. Они
-те же, что на сервере ([admin.md](admin.md)), отличается только установка.
+Пошагово: проверка и установка, сборка, первый запуск, загрузка журнала, выгрузка файлов,
+остановка и обновление. **Каждый шаг установки начинается с проверки:** что уже есть, то не
+ставится заново. Шаг 0 проверяет все сразу и говорит, какие шаги пропустить.
 
-Три папки, о которых идет речь:
+Все команды, кроме проверки и установки WSL, выполняются в терминале Ubuntu внутри WSL. Они те
+же, что на сервере ([server.md](server.md)), отличается только установка.
+
+Папки, о которых идет речь:
 
 | Где | Что | Как на сервере |
 |---|---|---|
 | `~/doc-registry-bot` (в Ubuntu) | исходный код, здесь собирается бот | нет, код живет только на ПК |
 | `~/kd-bot` (в Ubuntu) | рабочая папка бота: `.env`, скрипты, резервы | `/opt/doc-registry-bot` |
-| `C:\bot-files` = `/mnt/c/bot-files` | обмен файлами с Windows: журнал, списки, выгрузки | нет |
+| `E:\bot-files` = `/mnt/e/bot-files` | ваши файлы: журнал, списки, выгрузки | нет |
+
+Диски Windows видны в Ubuntu как папки: `C:` — `/mnt/c`, `E:` — `/mnt/e`. Файлы можно держать на
+любом диске, в командах тогда своя буква: `E:\Папка\журнал.csv` = `/mnt/e/Папка/журнал.csv`.
 
 Вставить команду в терминал Ubuntu: правая кнопка мыши или `Ctrl+Shift+V`.
 
-## 1. WSL и Ubuntu (один раз)
+## 0. Проверка: что уже установлено
+
+**WSL (в Windows).** **Пуск** → наберите «Терминал» → откройте и выполните:
+
+```text
+wsl -l -v
+```
+
+| Что видно | Что делать |
+|---|---|
+| строка с `Ubuntu` (например, `Ubuntu` или `Ubuntu-24.04`), в столбце `VERSION` стоит `2` | WSL готов, шаг 1 пропустите. Запомните имя Ubuntu из этой строки |
+| строка с `Ubuntu`, но `VERSION` стоит `1` | `wsl --set-version ИМЯ 2` (ИМЯ — из этой строки), потом шаг 1 пропустите |
+| Ubuntu в списке нет или команда не найдена | шаг 1 |
+
+Строки `docker-desktop` и `docker-desktop-data` — служебные Docker Desktop, это не Ubuntu.
+
+**Все остальное (в Ubuntu).** **Пуск** → **Ubuntu** (имя из списка выше). Вставьте блок целиком:
+
+```bash
+. /etc/os-release; echo "Ubuntu: $VERSION_ID"
+docker version --format 'Docker: {{.Server.Platform.Name}}'
+docker compose version
+git --version
+uv --version
+date +'Время: %Z'
+docker ps --format 'Контейнер: {{.Names}}'
+ls -d ~/doc-registry-bot ~/kd-bot
+```
+
+| Строка вывода | В порядке, если | Иначе |
+|---|---|---|
+| `Ubuntu: …` | `22.04` или новее | шаг 1: поставьте Ubuntu 24.04 рядом со старой |
+| `Docker: …` | `Docker Desktop …` | шаг 2 |
+| `Docker Compose version …` | версия `v2…` или новее | шаг 2 |
+| `git version …` | есть версия | шаг 3 |
+| `uv …` | есть версия | шаг 3 |
+| `Время: …` | `MSK` | шаг 3, часовой пояс |
+| `Контейнер: …` | среди строк есть служба мессенджера | см. ниже «Docker не тот» |
+| `ls: …/doc-registry-bot` | папка есть (`No such file` — нет) | шаг 4 |
+| `ls: …/kd-bot` | папка есть, если бот уже ставился | шаг 6 |
+
+Строки с `command not found` — программы нет, нужен шаг из таблицы.
+
+**Python** боту не нужен ни в Windows, ни в Ubuntu: `uv` сам скачает Python 3.13 только для этого
+проекта. Установленный Python не мешает, удалять его не надо.
+
+**Docker не тот.** Бот и служба мессенджера должны работать в одном Docker, иначе они не увидят
+друг друга. Если служба мессенджера есть в строках `Контейнер: …`, все в порядке, даже если
+`Docker:` показывает не Docker Desktop. Если службы в этих строках нет, а в окне Docker Desktop
+(раздел **Containers**) она есть, значит, в Ubuntu стоит отдельный Docker. Удалите его и включите
+интеграцию с Docker Desktop (шаг 2):
+
+```bash
+sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+## 1. WSL и Ubuntu (только если нет по шагу 0)
 
 1. **Пуск** → наберите «Терминал» → правой кнопкой → **Запуск от имени администратора**.
-2. Выполните (это единственная команда в Windows):
+2. Выполните:
 
    ```text
    wsl --install -d Ubuntu-24.04
@@ -26,47 +88,77 @@
 3. Перезагрузите компьютер, если попросит.
 4. **Пуск** → **Ubuntu 24.04**. При первом запуске придумайте имя пользователя Linux и пароль
    (пароль понадобится для команд с `sudo`, при вводе он не отображается).
+5. Повторите проверку из шага 0 в новой Ubuntu.
 
-## 2. Docker Desktop (один раз)
+## 2. Docker Desktop (только если нет по шагу 0)
 
-1. Скачайте Docker Desktop с docker.com и установите. В установщике оставьте отмеченным
-   **Use WSL 2 instead of Hyper-V**.
-2. Запустите Docker Desktop. **Settings** (шестеренка):
+Что показала строка `Docker:` в шаге 0:
+
+| Что видно | Что делать |
+|---|---|
+| `Cannot connect to the Docker daemon` | Docker Desktop не запущен: **Пуск** → **Docker Desktop**, подождите, пока внизу окна появится **Engine running**, и повторите шаг 0 |
+| `docker: command not found`, а Docker Desktop установлен | включите интеграцию с Ubuntu (пункт 2 ниже) |
+| `permission denied` и `docker.sock` | `sudo usermod -aG docker $USER`, закройте окно Ubuntu и откройте снова |
+| `docker: command not found`, и Docker Desktop нет в меню **Пуск** | установите (пункт 1 ниже) |
+
+1. **Установка.** Скачайте Docker Desktop с docker.com и установите. В установщике оставьте
+   отмеченным **Use WSL 2 instead of Hyper-V**.
+2. **Настройки.** Запустите Docker Desktop. **Settings** (шестеренка):
    - **General**: отмечены **Use the WSL 2 based engine** и **Start Docker Desktop when you sign
      in** (бот будет подниматься сам после включения ПК);
-   - **Resources → WSL integration**: включите переключатель **Ubuntu-24.04** → **Apply &
+   - **Resources → WSL integration**: включите переключатель с именем вашей Ubuntu → **Apply &
      restart**.
-3. Проверка в терминале Ubuntu:
+3. Повторите проверку из шага 0: строка `Docker: Docker Desktop …`.
 
-   ```bash
-   docker version
-   docker compose version
-   ```
+Настройки из пункта 2 проверьте, даже если Docker Desktop уже стоял: без **Start Docker Desktop
+when you sign in** бот после перезагрузки ПК сам не поднимется.
 
-   Есть строки `Server: Docker Desktop` и версия Compose — Docker готов.
+## 3. Инструменты в Ubuntu (только то, чего нет по шагу 0)
 
-Docker Engine внутри Ubuntu отдельно ставить не нужно: команды `docker` идут в Docker Desktop.
-
-## 3. Инструменты в Ubuntu (один раз)
+Нет `git`:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y git curl
-sudo timedatectl set-timezone Europe/Moscow
+```
+
+Нет `uv`:
+
+```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
 ```
 
-`uv` нужен для сборки: он сам скачает Python 3.13 и библиотеки.
+`uv` из Windows (если он там есть) в Ubuntu не виден: в Ubuntu нужен свой.
 
-## 4. Исходный код (один раз)
+Время не `MSK`:
+
+```bash
+sudo timedatectl set-timezone Europe/Moscow
+```
+
+Если ответ `System has not been booted with systemd`, то так:
+
+```bash
+sudo ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+```
+
+Повторите проверку из шага 0: все строки в порядке.
+
+## 4. Исходный код
+
+Папки `~/doc-registry-bot` нет (шаг 0):
 
 ```bash
 cd ~
 git clone https://github.com/rvburov/doc-registry-bot.git
 ```
 
-Код держите в папке Ubuntu (`~`), а не на диске `C:`: там сборка в разы медленнее.
+Папка есть: шаг 5 сам заберет свежий код (`git pull`).
+
+Код держите в папке Ubuntu (`~`): с диска Windows (`/mnt/e/...`) сборка в разы медленнее. Если
+код уже лежит на диске E: и был скачан в Windows, для бота склонируйте его заново в Ubuntu, как
+выше: так надежнее. Ваши файлы (журнал, списки) при этом остаются на E:.
 
 ## 5. Сборка
 
@@ -86,18 +178,20 @@ scripts/build.sh
 Последние строки: `Собрано: dist/doc-registry-bot-1.1.0.tar.gz`. Число в имени — версия, она
 нужна дальше.
 
-## 6. Рабочая папка бота (один раз)
+## 6. Рабочая папка бота
 
 ```bash
-mkdir -p ~/kd-bot /mnt/c/bot-files
+mkdir -p ~/kd-bot /mnt/e/bot-files
 cp ~/doc-registry-bot/dist/doc-registry-bot-1.1.0.tar.gz ~/doc-registry-bot/dist/*.sh \
    ~/doc-registry-bot/dist/compose.yaml ~/doc-registry-bot/dist/.env.example ~/kd-bot/
 cd ~/kd-bot
-cp .env.example .env
+cp -n .env.example .env
 chmod 600 .env
 chmod +x *.sh
 nano .env
 ```
+
+`cp -n` не трогает `.env`, если он уже есть: тогда только проверьте строки по таблице ниже.
 
 В `nano` заполните:
 
@@ -114,28 +208,32 @@ nano .env
 
 Строки `POSTGRES_*` заполняются до первого запуска: потом база их не перечитывает.
 
-## 7. Связь со службой мессенджера (один раз)
+## 7. Связь со службой мессенджера
 
-Служба мессенджера уже работает в Docker Desktop в своем контейнере. Бот достучится до нее
-через общую сеть Docker `messenger`.
-
-```bash
-docker network create messenger
-docker ps --format '{{.Names}}'
-```
-
-Вторая команда покажет имена контейнеров. Найдите службу мессенджера и подключите ее к сети
-(вместо `ИМЯ` — ее имя; то же имя в `MESSENGER_URL` в `.env`):
+Служба мессенджера работает в Docker Desktop в своем контейнере. Бот достучится до нее через
+общую сеть Docker `messenger`. Проверка:
 
 ```bash
-docker network connect messenger ИМЯ
 docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}}'
 ```
 
-Последняя команда должна показать имя службы.
+| Что видно | Что делать |
+|---|---|
+| имя службы мессенджера | связь уже есть, шаг пропустите |
+| `Error: No such network` | создайте сеть: `docker network create messenger`, затем строка ниже |
+| пусто или имени службы нет | подключите службу (ниже) |
 
-Если контейнер службы пересоздали (обновили или удалили и запустили заново), повторите
-`docker network connect messenger ИМЯ`.
+Имена контейнеров: `docker ps --format '{{.Names}}'`. Подключить службу (вместо `ИМЯ` — ее имя;
+то же имя в `MESSENGER_URL` в `.env`):
+
+```bash
+docker network connect messenger ИМЯ
+```
+
+Повторите проверку: в выводе имя службы.
+
+Если контейнер службы пересоздали (обновили или удалили и запустили заново), проверьте связь
+снова: подключение могло пропасть.
 
 ## 8. Один бот на учетную запись
 
@@ -145,7 +243,7 @@ docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}
 
 ## 9. Журнал (если нужен свой журнал, а не пустой)
 
-1. Положите файл журнала в папку `C:\bot-files` (например, `C:\bot-files\журнал.csv`). Нужен
+1. Положите файл журнала в папку `E:\bot-files` (например, `E:\bot-files\журнал.csv`). Нужен
    CSV или книга Excel, в первой строке восемь столбцов журнала: Наименование, Обозначение,
    ФИО регистрирующего, Дата регистрации, Проект, Отметка учета, Примечание (первичное
    применение), Примечание (краткая характеристика).
@@ -154,7 +252,7 @@ docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}
    ```bash
    cd ~/kd-bot
    ./backup.sh
-   ./import.sh /mnt/c/bot-files/журнал.csv
+   ./import.sh /mnt/e/bot-files/журнал.csv
    ```
 
 3. `import.sh` проверит файл («Файл годится, записей: N.») и спросит «Продолжить? (да/нет)».
@@ -185,7 +283,7 @@ cd ~/kd-bot
 
 Списком из файла (без инструкции):
 
-1. Файл `C:\bot-files\пользователи.csv`, первая строка `ID;ФИО`, дальше по человеку в строке:
+1. Файл `E:\bot-files\пользователи.csv`, первая строка `ID;ФИО`, дальше по человеку в строке:
 
    ```text
    ID;ФИО
@@ -196,7 +294,7 @@ cd ~/kd-bot
 
    ```bash
    cd ~/kd-bot
-   ./users.sh /mnt/c/bot-files/пользователи.csv
+   ./users.sh /mnt/e/bot-files/пользователи.csv
    ```
 
 Или по одному в мессенджере: «Выдать доступ: ФИО или ID».
@@ -215,10 +313,10 @@ cd ~/kd-bot
 ```bash
 cd ~/kd-bot
 ./backup.sh
-cp "$(ls -t backups/журнал-*.csv | head -n 1)" /mnt/c/bot-files/
+cp "$(ls -t backups/журнал-*.csv | head -n 1)" /mnt/e/bot-files/
 ```
 
-Свежий журнал появится в `C:\bot-files` с датой и временем в имени. Открывается в Excel двойным
+Свежий журнал появится в `E:\bot-files` с датой и временем в имени. Открывается в Excel двойным
 щелчком: русские буквы и столбцы на месте.
 
 Открыть всю папку резервов в Проводнике Windows:
@@ -286,4 +384,5 @@ cd ~/kd-bot
 | `Ошибка: нет файла .env` | вы не в рабочей папке: `cd ~/kd-bot` |
 | тесты в `build.sh` падают на базе | `docker compose -f tests/compose.yaml up -d` в `~/doc-registry-bot` |
 | бот запущен, но не отвечает | `docker compose logs bot`; проверьте имя в `MESSENGER_URL` и шаг 7 |
-| `No such file or directory` для файла из Windows | путь начинается с `/mnt/c/`, папки через `/`, имя с пробелами — в кавычках |
+| `No such file or directory` для файла из Windows | путь начинается с `/mnt/` и буквы диска (`/mnt/e/`), папки через `/`, имя с пробелами — в кавычках |
+| папки `/mnt/e` нет | диск сетевой или съемный: `sudo mkdir -p /mnt/e && sudo mount -t drvfs E: /mnt/e` |

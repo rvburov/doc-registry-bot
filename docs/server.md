@@ -1,7 +1,9 @@
 # Регистрация КД: бот на сервере (Ubuntu на виртуальной машине)
 
-Пошагово: подготовка сервера, связь со службой мессенджера, перенос всей базы с ПК, запуск,
-проверка, выгрузка файлов, обновление и остановка.
+Пошагово: проверка и подготовка сервера, связь со службой мессенджера, перенос всей базы с ПК,
+запуск, проверка, выгрузка файлов, обновление и остановка. **Каждый шаг подготовки начинается с
+проверки:** что уже есть, то не ставится заново. Шаг 2 проверяет весь сервер сразу и говорит,
+какие шаги пропустить.
 
 Команды на сервере выполняются в терминале по SSH, команды «на ПК» — в терминале Ubuntu внутри
 WSL ([pc.md](pc.md)). Где выполнять, написано в начале каждого шага.
@@ -10,7 +12,7 @@ WSL ([pc.md](pc.md)). Где выполнять, написано в начал�
 |---|---|---|
 | ПК | `~/doc-registry-bot` | исходный код, сборка |
 | ПК | `~/kd-bot` | бот на ПК (до переезда) |
-| ПК | `C:\bot-files` = `/mnt/c/bot-files` | обмен файлами с Windows |
+| ПК | `E:\bot-files` = `/mnt/e/bot-files` | ваши файлы в Windows (диск E:) |
 | сервер | `/opt/doc-registry-bot` | рабочая папка бота: `.env`, скрипты, резервы |
 | сервер | папка службы мессенджера | ее `compose.yaml` (шаг 4 покажет, где) |
 
@@ -34,73 +36,124 @@ ssh admin@10.0.0.5
 При первом входе ответьте `yes` на вопрос о ключе сервера и введите пароль. Выйти с сервера:
 `exit`.
 
-Чтобы не вводить пароль каждый раз (один раз, на ПК):
+**Вход без пароля** (по желанию). Если `ssh admin@10.0.0.5` уже пускает без пароля, это сделано,
+пропустите. Иначе на ПК проверьте, есть ли ключ:
 
 ```bash
-ssh-keygen -t ed25519
+ls ~/.ssh/id_ed25519.pub
+```
+
+- `No such file or directory`: ключа нет, создайте его (на вопросы отвечайте `Enter`):
+
+  ```bash
+  ssh-keygen -t ed25519
+  ```
+
+- Файл есть: ключ уже создан, `ssh-keygen` не запускайте (он предложит затереть ключ).
+
+Затем передайте ключ серверу (спросит пароль один последний раз):
+
+```bash
 ssh-copy-id admin@10.0.0.5
 ```
 
-На вопросы `ssh-keygen` отвечайте `Enter`.
+## 2. Проверка сервера и Ubuntu (на сервере)
 
-## 2. Ubuntu (один раз, на сервере)
+Вставьте блок целиком:
+
+```bash
+. /etc/os-release; echo "Ubuntu: $VERSION_ID"
+docker version --format 'Docker: {{.Server.Version}}'
+docker compose version
+snap list docker 2>/dev/null | grep -w docker
+id -nG | grep -qw docker && echo "Группа docker: есть" || echo "Группа docker: нет"
+date +'Время: %Z'
+docker network inspect messenger --format 'Сеть messenger: {{range .Containers}}{{.Name}} {{end}}'
+docker ps --format 'Контейнер: {{.Names}}'
+ls -d /opt/doc-registry-bot
+```
+
+| Строка вывода | В порядке, если | Иначе |
+|---|---|---|
+| `Ubuntu: …` | `22.04` или новее | обновите Ubuntu до 22.04 или 24.04 (вне этой инструкции) |
+| `Docker: …` | есть версия | `command not found` — шаг 3, установка; `permission denied` — шаг 3, группа |
+| `Docker Compose version …` | версия `v2…` или новее | шаг 3, установка |
+| строка со словом `docker` от snap | такой строки нет | шаг 3, Docker из snap |
+| `Группа docker: …` | `есть` | шаг 3, группа |
+| `Время: …` | `MSK` | ниже в этом шаге |
+| `Сеть messenger: …` | есть имя службы мессенджера | шаг 4 |
+| `Контейнер: …` | среди строк есть служба мессенджера | служба не запущена: запустите ее в ее папке (`docker compose up -d`) |
+| `ls: /opt/doc-registry-bot` | папка есть, если бот уже ставился | шаг 5 |
+
+Строки с `command not found` или `No such …` — этого нет, нужен шаг из таблицы.
+
+**Обновления Ubuntu** (по желанию, раз в месяц):
 
 ```bash
 sudo apt-get update
 sudo apt-get upgrade -y
-sudo timedatectl set-timezone Europe/Moscow
-timedatectl
 ```
 
-В выводе последней команды: `Time zone: Europe/Moscow`.
+Если в обновлении есть пакеты Docker, Docker перезапустится, а вместе с ним на минуту
+перезапустятся контейнеры, в том числе служба мессенджера и бот.
 
-## 3. Docker (один раз, на сервере)
-
-Служба мессенджера уже работает в Docker, поэтому сначала проверьте, что он есть:
+**Время не `MSK`:**
 
 ```bash
-docker version
-docker compose version
-snap list docker
+sudo timedatectl set-timezone Europe/Moscow
 ```
 
-- Обе первые команды показали версии, а `snap list docker` ответил, что такого нет (или команды
-  `snap` нет вовсе): Docker готов, переходите к концу шага (группа `docker`).
-- `snap list docker` показал `docker`: Docker установлен из snap, и с папкой `/opt` он работать
-  не будет. Остановитесь: этот случай инструкция не покрывает, Docker нужно ставить заново
-  отдельно, вместе со службой мессенджера.
-- `docker: command not found`: установите Docker:
+Повторите проверку: `Время: MSK`.
 
-  ```bash
-  sudo apt-get install -y ca-certificates curl
-  sudo install -m 0755 -d /etc/apt/keyrings
-  sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  sudo chmod a+r /etc/apt/keyrings/docker.asc
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-  sudo apt-get update
-  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  ```
+## 3. Docker (только если нет по шагу 2)
 
-Группа `docker`, чтобы команды шли без `sudo`:
+Служба мессенджера уже работает в Docker, поэтому обычно Docker есть, и нужна только группа.
+
+**Docker из snap** (в шаге 2 была строка `docker` от snap): с папкой `/opt` такой Docker работать
+не будет. Остановитесь: этот случай инструкция не покрывает, Docker нужно ставить заново
+отдельно, вместе со службой мессенджера.
+
+**Установка** (в шаге 2 `docker: command not found`):
+
+```bash
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+Нет только `docker compose` (в шаге 2 Docker есть, а Compose нет):
+
+```bash
+sudo apt-get install -y docker-compose-plugin
+```
+
+**Группа `docker`** (в шаге 2 `Группа docker: нет` или `permission denied`), чтобы команды шли
+без `sudo`:
 
 ```bash
 sudo usermod -aG docker "$USER"
 exit
 ```
 
-Зайдите снова (`ssh admin@10.0.0.5`) и проверьте: `docker ps` показывает список контейнеров без
-ошибки `permission denied`.
+Зайдите снова (`ssh admin@10.0.0.5`) и повторите проверку из шага 2.
 
-## 4. Связь со службой мессенджера (один раз, на сервере)
+## 4. Связь со службой мессенджера (на сервере)
 
-Бот ходит к службе мессенджера через общую сеть Docker `messenger`.
+Бот ходит к службе мессенджера через общую сеть Docker `messenger`. Что показала строка
+`Сеть messenger:` в шаге 2:
 
-```bash
-docker network create messenger
-docker ps --format '{{.Names}}'
-```
+| Что видно | Что делать |
+|---|---|
+| имя службы мессенджера | связь уже есть: только узнайте порт (`docker port ИМЯ`, ниже) и переходите к шагу 5 |
+| `Error: No such network` | создайте сеть: `docker network create messenger`, дальше весь шаг |
+| пусто или имени службы нет | дальше весь шаг, кроме создания сети |
 
-Найдите в списке службу мессенджера. Дальше вместо `ИМЯ` — ее имя.
+Имена контейнеров: `docker ps --format '{{.Names}}'`. Найдите службу мессенджера. Дальше вместо
+`ИМЯ` — ее имя.
 
 ```bash
 docker port ИМЯ
@@ -121,7 +174,9 @@ cp compose.yaml compose.yaml.bak
 nano compose.yaml
 ```
 
-В описании службы добавьте сети (если у службы уже есть `networks:`, допишите в него строку
+Если в файле уже есть строка `- messenger` в описании службы, файл менять не нужно: выполните
+только `docker compose up -d` ниже. Иначе в описании службы добавьте сети (если у службы уже есть
+`networks:`, допишите в него строку
 `- messenger`), а в конце файла — раздел `networks`:
 
 ```yaml
@@ -165,7 +220,9 @@ docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}
 Порт 8888 службы остается открытым: к службе могут подключаться другие программы с компьютеров
 сети. Боту порт не нужен. Как посмотреть, кто подключен, и как закрыть порт потом, — шаг 13.
 
-## 5. Рабочая папка бота (один раз, на сервере)
+## 5. Рабочая папка бота (на сервере)
+
+Если в шаге 2 папка `/opt/doc-registry-bot` уже есть, шаг пропустите. Иначе:
 
 ```bash
 sudo mkdir -p /opt/doc-registry-bot
@@ -181,15 +238,17 @@ scp dist/doc-registry-bot-1.1.0.tar.gz dist/*.sh dist/compose.yaml dist/.env.exa
 
 Файл образов около 200 МБ, копирование занимает несколько минут.
 
-## 7. Настройки `.env` (один раз, на сервере)
+## 7. Настройки `.env` (на сервере)
 
 ```bash
 cd /opt/doc-registry-bot
-cp .env.example .env
+cp -n .env.example .env
 chmod 600 .env
 chmod +x *.sh
 nano .env
 ```
+
+`cp -n` не трогает `.env`, если он уже есть: тогда только проверьте строки по таблице.
 
 | Строка | Что вписать |
 |---|---|
@@ -301,15 +360,15 @@ cd /opt/doc-registry-bot
 На ПК (имя файла — из вывода `backup.sh`):
 
 ```bash
-scp admin@10.0.0.5:/opt/doc-registry-bot/backups/журнал-2026-11-12_101500.csv /mnt/c/bot-files/
+scp admin@10.0.0.5:/opt/doc-registry-bot/backups/журнал-2026-11-12_101500.csv /mnt/e/bot-files/
 ```
 
-Файл появится в `C:\bot-files`, открывается в Excel двойным щелчком.
+Файл появится в `E:\bot-files`, открывается в Excel двойным щелчком.
 
 **Загрузить журнал с ПК на сервер** (заменяет весь журнал). На ПК:
 
 ```bash
-scp /mnt/c/bot-files/журнал.csv admin@10.0.0.5:/opt/doc-registry-bot/
+scp /mnt/e/bot-files/журнал.csv admin@10.0.0.5:/opt/doc-registry-bot/
 ```
 
 На сервере:

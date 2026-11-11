@@ -1,0 +1,8 @@
+# Переводы строк в репозитории и в рабочей копии всегда LF: скрипты .sh должны запускаться в bash,
+# даже если код скачан через Git в Windows.
+* text=auto eol=lf
+*.gz binary
+*.xlsx binary
+*.xlsm binary
+*.png binary
+*.dump binary
