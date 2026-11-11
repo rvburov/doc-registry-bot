@@ -8,6 +8,7 @@ from doc_registry_bot.bot.context import Ctx
 from doc_registry_bot.bot.types import UserCard
 from doc_registry_bot.db.models import Member
 from doc_registry_bot.registry import text
+from doc_registry_bot.registry.names import is_full_name
 
 
 @dataclass(frozen=True)
@@ -61,11 +62,10 @@ def from_dict(data: dict[str, object]) -> Person:
 
 @dataclass
 class Resolution:
-    """Итог поиска людей по списку из команды."""
+    """Итог поиска людей по списку из команды: найденные и ошибки по строке на человека."""
 
     found: list[Person]
-    ambiguous: list[tuple[str, list[Person]]]
-    missing: list[str]
+    problems: list[str]
 
 
 def tokens_of(argument: str) -> list[str]:
@@ -73,33 +73,38 @@ def tokens_of(argument: str) -> list[str]:
     return [part.strip() for part in argument.replace(";", ",").split(",") if part.strip()]
 
 
-def _matches(query: str, fio: str) -> bool:
-    words = text.fold(fio).split()
-    return all(any(word.startswith(part) for word in words) for part in text.fold(query).split())
-
-
 async def resolve(ctx: Ctx, tokens: list[str]) -> Resolution:
-    """Найти каждого: число — ID, иначе поиск по ФИО (части слов в любом порядке)."""
-    result = Resolution([], [], [])
+    """Найти каждого: число — ID, иначе ТОЛЬКО полное ФИО, совпадающее целиком.
+
+    Части ФИО не ищутся: «Иванов» легко попадает не в того человека. Два человека с одним
+    полным ФИО — бот не выбирает сам и просит ID.
+    """
+    result = Resolution([], [])
     contacts: list[Person] | None = None
     for token in tokens:
         if token.isdigit():
             card = await ctx.messenger.user_card(int(token))
             if card is None:
-                result.missing.append(f"ID {token}")
+                result.problems.append(f"ID {token}: не найден в мессенджере")
             else:
                 result.found.append(person_of(card))
             continue
+        fio = text.collapse(token)
+        if not is_full_name(fio):
+            result.problems.append(f"{token}: укажите полное ФИО или ID")
+            continue
         if contacts is None:
             contacts = [person_of(card) for card in await ctx.messenger.contacts()]
-        exact = [p for p in contacts if text.fold(p.fio) == text.fold(token)]
-        candidates = exact or [p for p in contacts if _matches(token, p.fio)]
-        if not candidates:
-            result.missing.append(token)
-        elif len(candidates) == 1:
-            result.found.append(candidates[0])
+        same = [p for p in contacts if text.fold(p.fio) == text.fold(fio)]
+        if not same:
+            result.problems.append(f"{fio}: не найден среди контактов бота, укажите ID")
+        elif len(same) == 1:
+            result.found.append(same[0])
         else:
-            result.ambiguous.append((token, candidates))
+            listed = "; ".join(
+                f"ID {p.user_id}" + (f" ({p.detail})" if p.detail else "") for p in same
+            )
+            result.problems.append(f"{fio}: найдено несколько человек, укажите ID: {listed}")
     return result
 
 

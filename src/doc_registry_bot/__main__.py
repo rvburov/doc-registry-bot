@@ -48,7 +48,7 @@ def _config(settings: Settings) -> BotConfig:
 
 
 async def _run(settings: Settings) -> None:
-    engine = engine_for(settings.database_url)
+    engine = engine_for(settings.dsn)
     messenger = HttpMessenger(settings.messenger_url)
     bot_id: int | None = None
     try:
@@ -79,7 +79,7 @@ async def _run(settings: Settings) -> None:
 
 
 async def _import(settings: Settings, data: bytes) -> int:
-    engine = engine_for(settings.database_url)
+    engine = engine_for(settings.dsn)
     try:
         report = await import_journal(sessions(engine), data, settings.zone, datetime.now(UTC))
     finally:
@@ -110,7 +110,7 @@ def main() -> None:
     # Каждый запрос к службе мессенджера в журнал не пишется: только сбои.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if command in ("run", "migrate"):
-        upgrade(settings.database_url)
+        upgrade(settings.dsn)
         if command == "migrate":
             print("Схема базы обновлена.")
             return
@@ -120,7 +120,7 @@ def main() -> None:
         if len(args) != 2:
             print("Использование: import ФАЙЛ.xlsx", file=sys.stderr)
             raise SystemExit(2)
-        upgrade(settings.database_url)
+        upgrade(settings.dsn)
         raise SystemExit(asyncio.run(_import(settings, Path(args[1]).read_bytes())))
     print(f"Неизвестная команда: {command}. Можно: run, migrate, import, version", file=sys.stderr)
     raise SystemExit(2)

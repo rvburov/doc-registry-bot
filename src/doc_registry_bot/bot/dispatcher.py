@@ -125,7 +125,7 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
         if await _answer_pending(ctx, role, found, plain, answer):
             return
         # Пока ждем ответа, доступны только справка и просмотр.
-        if command is not None and command.word in (commands.HELP, commands.INSTRUCTION):
+        if command is not None and command.word in commands.ALWAYS:
             await commands.run(ctx, command, role, incoming.file_ids, incoming.message_id)
         elif command is None and known == documents.VIEW and not incoming.file_ids:
             await documents.run(ctx, known, values)
@@ -158,32 +158,17 @@ async def _answer_pending(
 ) -> bool:
     """Ответ на ожидание. False — сообщение ответом не является."""
     kind, payload = found.kind, dict(found.payload)
-    if kind == "choose":
-        if answer is False:
-            await pending.take(ctx, found)
-            ctx.reply(markup.bold("Операция отменена"))
-            return True
-        numbers = commands.parse_choice(plain)
-        if numbers is None:
+    if kind in commands.PEOPLE_COMMANDS:
+        without = kind == commands.GRANT and text.fold(plain) == WITHOUT_INSTRUCTION
+        if answer is None and not without:
             return False
-        problem = commands.choice_problem(payload, numbers)
-        if problem is not None:
-            refused(ctx, problem)
-            return True
         await pending.take(ctx, found)
-        await commands.apply_choice(ctx, role, payload, numbers)
-        return True
-    if kind == "grant":
-        if text.fold(plain) == WITHOUT_INSTRUCTION or answer is not None:
-            await pending.take(ctx, found)
-            if answer is False:
-                ctx.reply(markup.bold("Операция отменена"))
-            elif not role.is_admin:
-                refused(ctx, commands.NO_RIGHTS)
-            else:
-                await commands.confirm_grant(ctx, payload, with_instruction=answer is True)
+        if answer is not False and not commands.allowed(kind, role):
+            refused(ctx, commands.NO_RIGHTS)
             return True
-        return False
+        reply = "нет" if answer is False else "без инструкции" if without else "да"
+        await commands.confirm(ctx, kind, payload, reply)
+        return True
     if answer is None:
         return False
     await pending.take(ctx, found)
@@ -191,17 +176,9 @@ async def _answer_pending(
         ctx.reply(markup.bold("Операция отменена"))
         return True
     if kind in ("register", "batch", "file"):
-        if not role.can_register:
-            refused(ctx, commands.DENIED)
-            return True
         await registration.confirm(ctx, kind, payload)
     elif kind in ("delete", "edit"):
         await documents.confirm(ctx, kind, payload)
-    elif kind == "send":
-        if not role.is_admin:
-            refused(ctx, commands.NO_RIGHTS)
-            return True
-        await commands.confirm_send(ctx, payload)
     return True
 
 

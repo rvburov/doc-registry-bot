@@ -46,3 +46,23 @@ def test_a_wrong_value_names_the_reason(
 ) -> None:
     with pytest.raises(ValidationError, match=words):
         settings(monkeypatch, **{key: value})
+
+
+def test_the_database_is_built_from_postgres_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    for key in ("MESSENGER_URL", "OWNER_IDS", "ORG_CODES"):
+        monkeypatch.setenv(key, GOOD[key])
+    monkeypatch.setenv("POSTGRES_DB", "kd")
+    monkeypatch.setenv("POSTGRES_USER", "bot")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss:w/rd%1")
+    result = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert result.dsn == "postgresql+psycopg://bot:p%40ss%3Aw%2Frd%251@postgres:5432/kd"
+
+
+def test_a_missing_database_password_stops_the_bot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+    for key in ("MESSENGER_URL", "OWNER_IDS", "ORG_CODES"):
+        monkeypatch.setenv(key, GOOD[key])
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        Settings(_env_file=None)  # type: ignore[call-arg]

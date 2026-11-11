@@ -75,13 +75,23 @@ async def test_help_shows_only_own_commands(stand: Stand) -> None:
     registrar = markup.plain(await stand.say(REGISTRAR, "Помощь"))
     admin = markup.plain(await stand.say(ADMIN, "помощь"))
     owner = markup.plain(await stand.say(OWNER, "Помощь"))
-    assert "Выгрузка" not in registrar
-    assert "Выгрузка" in admin and "Админ ID" not in admin
-    assert "Админ ID" in owner
+    assert "Выгрузить журнал" not in registrar
+    assert "Выгрузить журнал" in admin and "Назначить администратора" not in admin
+    assert "Назначить администратора" in owner
+
+
+async def test_the_admin_instruction_is_for_admins_only(stand: Stand) -> None:
+    admin = markup.plain(await stand.say(ADMIN, "Инструкция администратора"))
+    assert admin.startswith("Инструкция администратора бота регистрации КД")
+    assert "Выдать доступ: Иванов Иван Иванович, 123456" in admin
+    assert markup.plain(await stand.say(REGISTRAR, "Инструкция администратора")).startswith(
+        "Нет прав"
+    )
+    assert "Инструкция по работе" in await stand.say(REGISTRAR, "Инструкция")
 
 
 async def test_an_admin_command_from_a_registrar_is_refused(stand: Stand) -> None:
-    answer = markup.plain(await stand.say(REGISTRAR, "Доступ 9999"))
+    answer = markup.plain(await stand.say(REGISTRAR, "Выдать доступ: 9999"))
     assert answer.startswith("Нет прав на эту команду")
     assert (await stand.member(STRANGER)) is None
 
@@ -92,60 +102,105 @@ async def test_the_owner_needs_no_access_row(stand: Stand) -> None:
     assert "<b>АБВГ.301121.002</b>" in done
 
 
+# ── Люди: только полное ФИО или ID ───────────────────────────────────────────
+
+
+async def test_a_partial_name_is_refused(stand: Stand) -> None:
+    answer = markup.plain(await stand.say(ADMIN, "Выдать доступ: Чужов"))
+    assert answer == "Чужов: укажите полное ФИО или ID"
+    assert (await stand.member(STRANGER)) is None
+
+
+async def test_the_full_name_finds_one_person(stand: Stand) -> None:
+    preview = markup.plain(await stand.say(ADMIN, "Выдать доступ: чужов  степан степанович"))
+    assert "Чужов Степан Степанович, ID 9999" in preview
+
+
+async def test_two_people_with_one_name_require_an_id(stand: Stand) -> None:
+    stand.messenger.person(3001, "Петров", "Петр", "Петрович", "Цех 1")
+    stand.messenger.person(3002, "Петров", "Петр", "Петрович", "Цех 2")
+    answer = markup.plain(await stand.say(ADMIN, "Выдать доступ: Петров Петр Петрович"))
+    assert answer == (
+        "Петров Петр Петрович: найдено несколько человек, укажите ID: "
+        "ID 3001 (Цех 1); ID 3002 (Цех 2)"
+    )
+    preview = markup.plain(await stand.say(ADMIN, "Выдать доступ: 3002"))
+    assert "ID 3002 (Цех 2)" in preview
+
+
+async def test_an_unknown_person_is_named(stand: Stand) -> None:
+    answer = markup.plain(await stand.say(ADMIN, "Выдать доступ: Сидоров Сидор Сидорович, 777"))
+    assert answer == (
+        "Сидоров Сидор Сидорович: не найден среди контактов бота, укажите ID\n"
+        "ID 777: не найден в мессенджере"
+    )
+
+
 # ── Доступ ───────────────────────────────────────────────────────────────────
 
 
-async def test_access_is_granted_with_the_instruction_after_yes(stand: Stand) -> None:
-    preview = markup.plain(await stand.say(ADMIN, "Доступ 9999"))
+async def test_access_is_granted_and_the_instruction_delivery_is_reported(stand: Stand) -> None:
+    preview = markup.plain(await stand.say(ADMIN, "Выдать доступ: 9999"))
     assert "Выдать доступ к регистрации КД:" in preview
     assert "Чужов Степан Степанович, ID 9999" in preview
-    done = await stand.say(ADMIN, "Да")
-    assert "Доступ выдан: 1" in markup.plain(done)
+    done = markup.plain(await stand.say(ADMIN, "Да"))
+    assert "Доступ выдан: 1" in done
+    assert "Инструкция отправлена: 1 из 1" in done
     member = await stand.member(STRANGER)
     assert member is not None and member.has_access
-    greeting = [r for r in stand.replies if r.user_id == STRANGER]
-    assert greeting and "Инструкция по регистрации документов" in greeting[0].html
+    [greeting] = [s for s in stand.messenger.sent if s.user_id == STRANGER]
+    assert "Инструкция по регистрации документов" in greeting.html
     [audit] = [a for a in await stand.audit() if a.action == "Выдача доступа"]
     assert audit.actor_fio == "Админов Андрей Андреевич"
     assert audit.actor_id == ADMIN
 
 
-async def test_access_without_instruction_for_the_move(stand: Stand) -> None:
-    await stand.say(ADMIN, "Доступ 9999")
-    done = markup.plain(await stand.say(ADMIN, "Без инструкции"))
-    assert "Инструкция не отправлялась." in done
-    assert [r for r in stand.replies if r.user_id == STRANGER] == []
+async def test_an_undelivered_instruction_is_named(stand: Stand) -> None:
+    stand.messenger.broken.add(STRANGER)
+    await stand.say(ADMIN, "Выдать доступ: 9999")
+    done = markup.plain(await stand.say(ADMIN, "Да"))
+    assert "Инструкция отправлена: 0 из 1" in done
+    assert "Не дошла:" in done
+    assert "Чужов Степан Степанович, ID 9999" in done
     member = await stand.member(STRANGER)
     assert member is not None and member.has_access
 
 
-async def test_an_ambiguous_name_is_chosen_by_number(stand: Stand) -> None:
-    stand.messenger.person(3001, "Петров", "Петр", "Петрович", "Цех 1")
-    stand.messenger.person(3002, "Петров", "Павел", "Петрович", "Цех 2")
-    asked = markup.plain(await stand.say(ADMIN, "Доступ Петров, Чужов"))
-    assert "Найдено несколько человек" in asked
-    assert "1. Петров Петр Петрович, ID 3001 (Цех 1)" in asked
-    assert "2. Петров Павел Петрович, ID 3002 (Цех 2)" in asked
-    assert "Ответьте номерами" in asked
-    bad = markup.plain(await stand.say(ADMIN, "5"))
-    assert "от 1 до 2" in bad
-    preview = markup.plain(await stand.say(ADMIN, "2"))
-    assert "Петров Павел Петрович" in preview and "Чужов Степан Степанович" in preview
-    assert "Петров Петр Петрович" not in preview
-    await stand.say(ADMIN, "Да")
-    member = await stand.member(3002)
+async def test_access_without_instruction_for_the_move(stand: Stand) -> None:
+    await stand.say(ADMIN, "Выдать доступ: 9999")
+    done = markup.plain(await stand.say(ADMIN, "Без инструкции"))
+    assert "Инструкция не отправлялась." in done
+    assert stand.messenger.sent == []
+    member = await stand.member(STRANGER)
     assert member is not None and member.has_access
 
 
-async def test_an_unknown_person_is_named(stand: Stand) -> None:
-    answer = markup.plain(await stand.say(ADMIN, "Доступ Сидоров"))
-    assert answer == "Сидоров: не найден среди контактов бота"
+async def test_no_cancels_a_grant(stand: Stand) -> None:
+    await stand.say(ADMIN, "Выдать доступ: 9999")
+    assert markup.plain(await stand.say(ADMIN, "Нет")) == "Операция отменена"
+    assert (await stand.member(STRANGER)) is None
 
 
-async def test_access_is_revoked(stand: Stand) -> None:
-    answer = markup.plain(await stand.say(ADMIN, "Забрать доступ 1001"))
-    assert "Доступ снят: 1" in answer
+async def test_access_is_deleted_after_yes(stand: Stand) -> None:
+    preview = markup.plain(await stand.say(ADMIN, "Удалить доступ: Иванов Иван Иванович"))
+    assert "Удалить доступ к регистрации КД:" in preview
+    assert "Подтвердите: Да или Нет" in preview
+    registered = await stand.say(REGISTRAR, "Инструкция")
+    assert "Инструкция по работе" in registered
+    done = markup.plain(await stand.say(ADMIN, "Да"))
+    assert "Доступ удален: 1" in done
     assert "нет доступа" in markup.plain(await stand.say(REGISTRAR, registration()))
+
+
+async def test_the_instruction_is_sent_again_to_people_with_access(stand: Stand) -> None:
+    refused = markup.plain(await stand.say(ADMIN, "Отправить инструкцию: 9999"))
+    assert "нет доступа к боту, сначала Выдать доступ" in refused
+    preview = markup.plain(await stand.say(ADMIN, "Отправить инструкцию: 1001"))
+    assert "Отправить инструкцию:" in preview
+    done = markup.plain(await stand.say(ADMIN, "Да"))
+    assert done == "Инструкция отправлена: 1 из 1"
+    [sent] = stand.messenger.sent
+    assert sent.user_id == REGISTRAR
 
 
 async def test_users_lists_everyone_with_access(stand: Stand) -> None:
@@ -158,20 +213,32 @@ async def test_users_lists_everyone_with_access(stand: Stand) -> None:
 # ── Администраторы ───────────────────────────────────────────────────────────
 
 
-async def test_only_the_owner_appoints_admins(stand: Stand) -> None:
-    refused = markup.plain(await stand.say(ADMIN, "Админ 1001"))
+async def test_only_the_owner_appoints_admins_after_yes(stand: Stand) -> None:
+    refused = markup.plain(await stand.say(ADMIN, "Назначить администратора: 1001"))
     assert refused.startswith("Нет прав")
-    done = markup.plain(await stand.say(OWNER, "Админ 1001"))
+    preview = markup.plain(await stand.say(OWNER, "Назначить администратора: 1001"))
+    assert "Назначить администраторами:" in preview
+    done = markup.plain(await stand.say(OWNER, "Да"))
     assert "Назначены администраторами: 1" in done
     member = await stand.member(REGISTRAR)
     assert member is not None and member.is_admin
-    assert any("права администратора" in r.html for r in stand.replies if r.user_id == REGISTRAR)
-    listing = markup.plain(await stand.say(OWNER, "Админы"))
+    assert any(
+        "Инструкция администратора" in r.html for r in stand.replies if r.user_id == REGISTRAR
+    )
+    listing = markup.plain(await stand.say(OWNER, "Администраторы"))
     assert "Иванов Иван Иванович, ID 1001" in listing
 
 
+async def test_an_admin_is_removed_after_yes(stand: Stand) -> None:
+    await stand.say(OWNER, "Снять администратора: 2")
+    done = markup.plain(await stand.say(OWNER, "Да"))
+    assert "Сняты с администраторов: 1" in done
+    member = await stand.member(ADMIN)
+    assert member is not None and not member.is_admin
+
+
 async def test_the_owner_cannot_be_removed(stand: Stand) -> None:
-    answer = markup.plain(await stand.say(OWNER, "Снять админа 1"))
+    answer = markup.plain(await stand.say(OWNER, "Снять администратора: 1"))
     assert "владельца снять нельзя" in answer
 
 
@@ -180,7 +247,7 @@ async def test_the_owner_cannot_be_removed(stand: Stand) -> None:
 
 async def test_export_sends_the_whole_journal_as_csv(stand: Stand) -> None:
     await stand.add("АБВГ.301121.001", "АБВГ.301121.002")
-    answer = await stand.say(ADMIN, "Выгрузка")
+    answer = await stand.say(ADMIN, "Выгрузить журнал")
     assert "Записей: 2" in markup.plain(answer)
     [reply] = stand.replies
     [file] = reply.files
@@ -193,37 +260,52 @@ async def test_export_sends_the_whole_journal_as_csv(stand: Stand) -> None:
 
 
 async def test_the_action_log_is_sent_as_csv(stand: Stand) -> None:
-    await stand.say(ADMIN, "Выгрузка")
+    await stand.say(ADMIN, "Выгрузить журнал")
     answer = markup.plain(await stand.say(ADMIN, "Журнал действий"))
     assert "Выгрузка журнала" in answer
     [reply] = stand.replies
     assert reply.files[0].name.startswith("Журнал действий")
 
 
-# ── Отправка ─────────────────────────────────────────────────────────────────
+# ── Отправка сообщения ───────────────────────────────────────────────────────
 
 
-async def test_a_message_to_one_person_goes_at_once_with_files(stand: Stand) -> None:
+async def test_a_message_is_previewed_then_sent_with_files(stand: Stand) -> None:
     stand.messenger.files[(stand.message_id + 1, 4)] = Attachment("Приказ.pdf", b"%PDF")
-    answer = markup.plain(await stand.say(ADMIN, "Отправить: 1001\nСобрание в 10:00 <важно>", [4]))
-    assert answer == "Отправлено: 1 из 1"
+    preview = markup.plain(
+        await stand.say(
+            ADMIN,
+            "Отправить сообщение: Иванов Иван Иванович\nСообщение: Собрание в 10:00 <важно>\n"
+            "Повестка во вложении.",
+            [4],
+        )
+    )
+    assert "Отправить сообщение: получателей 1" in preview
+    assert "Собрание в 10:00 <важно>\nПовестка во вложении." in preview
+    assert "Файлов: 1" in preview
+    assert stand.messenger.sent == []
+    assert markup.plain(await stand.say(ADMIN, "Да")) == "Отправлено: 1 из 1"
     [sent] = stand.messenger.sent
     assert sent.user_id == REGISTRAR
-    assert sent.html == "Собрание в 10:00 &lt;важно&gt;"
+    assert sent.html == "Собрание в 10:00 &lt;важно&gt;\nПовестка во вложении."
     assert sent.files[0].name == "Приказ.pdf"
 
 
-async def test_a_message_to_several_people_asks_first(stand: Stand) -> None:
-    preview = markup.plain(await stand.say(ADMIN, "Отправить всем\nПроверка связи"))
-    assert "Отправить сообщение получателям: 2" in preview
-    assert stand.messenger.sent == []
-    done = markup.plain(await stand.say(ADMIN, "Да"))
-    assert done == "Отправлено: 2 из 2"
+async def test_a_message_without_text_is_refused(stand: Stand) -> None:
+    answer = markup.plain(await stand.say(ADMIN, "Отправить сообщение: 1001\nСобрание"))
+    assert answer.startswith("Сообщение: не указан текст")
+
+
+async def test_a_message_to_everyone_with_access(stand: Stand) -> None:
+    preview = markup.plain(await stand.say(ADMIN, "Отправить сообщение: всем\nСообщение: Тест"))
+    assert "получателей 2" in preview
+    assert markup.plain(await stand.say(ADMIN, "Да")) == "Отправлено: 2 из 2"
     assert sorted(s.user_id for s in stand.messenger.sent) == [OWNER, REGISTRAR]
 
 
 async def test_a_failed_delivery_is_reported(stand: Stand) -> None:
     stand.messenger.broken.add(REGISTRAR)
-    answer = markup.plain(await stand.say(ADMIN, "Отправить: 1001\nТекст"))
+    await stand.say(ADMIN, "Отправить сообщение: 1001\nСообщение: Текст")
+    answer = markup.plain(await stand.say(ADMIN, "Да"))
     assert answer.startswith("Отправлено: 0 из 1")
     assert "Не отправлено:" in answer

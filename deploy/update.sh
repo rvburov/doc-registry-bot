@@ -89,8 +89,9 @@ restore() {
   [ "$answer" = "да" ] || fail "отменено"
   backup_now
   docker compose stop bot
-  docker compose exec -T backup pg_restore --clean --if-exists --no-owner -d doc_registry \
-    "/backups/$dump"
+  # Имя базы и пользователь — из .env, их знает контейнер копии (PGDATABASE, PGUSER).
+  docker compose exec -T -e DUMP="/backups/$dump" backup \
+    sh -c 'pg_restore --clean --if-exists --no-owner -d "$PGDATABASE" "$DUMP"'
   docker compose start bot
   check_started "$(current_version)"
 }

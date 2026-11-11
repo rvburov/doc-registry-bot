@@ -70,6 +70,9 @@ class HttpMessenger:
                 for i, f in enumerate(files)
             ]
         response = await self._request("PUT", "/message", json=body)
+        if response.status_code == 404:
+            # По описанию API: «Контакта нет в списке пользователей».
+            raise MessengerError("бота нет в контактах получателя")
         if response.status_code != 200:
             raise self._fail("отправка сообщения", response)
         if not files:

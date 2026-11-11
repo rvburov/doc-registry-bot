@@ -6,9 +6,10 @@
 
 from functools import cached_property
 from typing import Annotated
+from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from doc_registry_bot.registry import text
@@ -20,7 +21,14 @@ class Settings(BaseSettings):
     messenger_url: str = Field(description="Адрес службы мессенджера: http://контейнер:8888")
     owner_ids: Annotated[list[int], NoDecode] = Field(description="ID владельцев через запятую")
     org_codes: Annotated[list[str], NoDecode] = Field(description="Коды организации через запятую")
-    database_url: str = Field(description="postgresql+psycopg://пользователь:пароль@хост/база")
+    # База бота: имя, пользователь и пароль из .env (их же получает контейнер PostgreSQL).
+    # DATABASE_URL целиком — только если база не в нашем compose; тогда POSTGRES_* не нужны.
+    postgres_host: str = "postgres"
+    postgres_port: int = Field(default=5432, ge=1, le=65535)
+    postgres_db: str = "doc_registry"
+    postgres_user: str = "doc_registry"
+    postgres_password: str = ""
+    database_url: str = ""
     time_zone: str = "Europe/Moscow"
     catchup_hours: int = Field(default=24, ge=1, le=24 * 30)
     backup_status_file: str = "/backups/status.json"
@@ -73,6 +81,25 @@ class Settings(BaseSettings):
             raise ValueError(f"TIME_ZONE: неизвестный часовой пояс «{value}»") from error
         return value
 
+    @model_validator(mode="after")
+    def _database(self) -> "Settings":
+        if not self.database_url and not self.postgres_password:
+            raise ValueError("POSTGRES_PASSWORD: задайте пароль базы бота")
+        return self
+
     @cached_property
     def zone(self) -> ZoneInfo:
         return ZoneInfo(self.time_zone)
+
+    @property
+    def dsn(self) -> str:
+        """Адрес базы для SQLAlchemy. Пароль экранируется: в нем могут быть @, : и /."""
+        if self.database_url:
+            return self.database_url
+        user = quote(self.postgres_user, safe="")
+        password = quote(self.postgres_password, safe="")
+        database = quote(self.postgres_db, safe="")
+        return (
+            f"postgresql+psycopg://{user}:{password}@{self.postgres_host}:{self.postgres_port}"
+            f"/{database}"
+        )

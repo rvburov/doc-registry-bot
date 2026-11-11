@@ -8,14 +8,14 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: doc_registry
-      POSTGRES_USER: doc_registry
+      POSTGRES_DB: ${POSTGRES_DB:-doc_registry}
+      POSTGRES_USER: ${POSTGRES_USER:-doc_registry}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       TZ: Europe/Moscow
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U doc_registry -d doc_registry"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -30,7 +30,10 @@ services:
       MESSENGER_URL: ${MESSENGER_URL:?задайте MESSENGER_URL в .env}
       OWNER_IDS: ${OWNER_IDS:?задайте OWNER_IDS в .env}
       ORG_CODES: ${ORG_CODES:?задайте ORG_CODES в .env}
-      DATABASE_URL: postgresql+psycopg://doc_registry:${POSTGRES_PASSWORD}@postgres:5432/doc_registry
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-doc_registry}
+      POSTGRES_USER: ${POSTGRES_USER:-doc_registry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       BACKUP_STATUS_FILE: /backups/status.json
       TIME_ZONE: Europe/Moscow
       TZ: Europe/Moscow
@@ -48,8 +51,8 @@ services:
         condition: service_healthy
     environment:
       PGHOST: postgres
-      PGUSER: doc_registry
-      PGDATABASE: doc_registry
+      PGUSER: ${POSTGRES_USER:-doc_registry}
+      PGDATABASE: ${POSTGRES_DB:-doc_registry}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       BACKUP_TIME: ${BACKUP_TIME:-03:00}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
