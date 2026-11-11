@@ -232,7 +232,8 @@ BACKUP_SHARE_DOMAIN=
 
 ## 10. Сборка и доставка
 
-- Образ собирается только на ПК пользователя (Windows, Docker Desktop, Git Bash):
+- Образ собирается только на ПК пользователя (Windows, WSL с Ubuntu, Docker Desktop; команды в
+  терминале Ubuntu, те же, что на сервере, — [pc.md](pc.md)):
   `scripts/build.sh` — проверки → образ `doc-registry-bot:<версия>` → файл
   `doc-registry-bot-<версия>.tar.gz`. Реестры образов не используются.
 - На сервер файл попадает по SSH. Установка — `deploy/update.sh <файл>`: копия базы → загрузка

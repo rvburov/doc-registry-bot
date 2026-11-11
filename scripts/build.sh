@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Сборка на компьютере пользователя (Windows: Git Bash, Docker Desktop).
+# Сборка на компьютере пользователя (Windows: терминал Ubuntu в WSL, Docker Desktop; docs/pc.md).
 #
 #   scripts/build.sh
 #
