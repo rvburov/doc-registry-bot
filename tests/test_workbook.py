@@ -1,4 +1,4 @@
-"""Книга Excel вложением. Примеры перенесены из FileMessageReadTests SmartBase."""
+"""Книга Excel вложением."""
 
 import io
 import zipfile

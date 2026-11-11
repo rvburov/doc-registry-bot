@@ -1,4 +1,4 @@
-"""Кадры STOMP: те же, что посылал SmartBase (CONNECT с heart-beat 0,0, SUBSCRIBE с ack auto)."""
+"""Кадры STOMP: CONNECT с heart-beat 0,0 и SUBSCRIBE с ack auto."""
 
 from dataclasses import dataclass
 

@@ -1,6 +1,4 @@
-"""Регистрация по сообщению целиком: сообщение → номер → ответ. Поведение повторяет SmartBase
-(RegisterMessageActionTests, RegistrationConfirmationTests, BatchRegistrationTests,
-DocumentMessageTests, ReplyMarkupTests)."""
+"""Регистрация по сообщению целиком: сообщение → номер → ответ."""
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

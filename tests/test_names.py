@@ -1,4 +1,4 @@
-"""ФИО полностью. Примеры из RegistryImportTests SmartBase."""
+"""ФИО полностью."""
 
 import pytest
 

@@ -46,7 +46,7 @@ def server_time(ctime: int) -> datetime:
 
 
 def incoming_of(kind: str, row: dict[str, Any]) -> Incoming | None:
-    """Событие потока → входящее сообщение. Берутся только INCOMING_MESSAGE, как в SmartBase."""
+    """Событие потока → входящее сообщение. Берутся только INCOMING_MESSAGE."""
     if kind != "INCOMING_MESSAGE":
         return None
 
@@ -165,7 +165,7 @@ class BotService:
     async def catch_up(self) -> None:
         """Дочитать историю после последнего обработанного сообщения.
 
-        При первом запуске отметки нет: история до переключения уже обработана SmartBase.
+        При первом запуске отметки нет: история до первого запуска бота не дочитывается.
         """
         last = await self._state(LAST_CTIME)
         if last is None:

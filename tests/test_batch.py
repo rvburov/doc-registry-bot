@@ -1,4 +1,4 @@
-"""Список номеров через запятую. Примеры перенесены из BatchMessageParsingTests SmartBase."""
+"""Список номеров через запятую."""
 
 import pytest
 

@@ -1,8 +1,8 @@
 """HTTP API службы мессенджера: ответы, файлы, карточки, контакты, история.
 
-Ответ уходит так же, как его отправлял SmartBase: `PUT /message` с `targetType: person`, перенос
-строки в тексте — `<br>`. Файлы: сообщение создается со списком файлов, затем каждый файл
-загружается блоками по 1 МиБ (`POST /message/file`, заголовок `Upload-Offset`).
+Ответ уходит запросом `PUT /message` с `targetType: person`, перенос строки в тексте — `<br>`.
+Файлы: сообщение создается со списком файлов, затем каждый файл загружается блоками по 1 МиБ
+(`POST /message/file`, заголовок `Upload-Offset`).
 """
 
 import asyncio
@@ -239,7 +239,7 @@ def _usable(name: str) -> str:
 def file_name(header: str | None) -> str:
     """Имя файла из Content-Disposition: filename*, filename или голое имя с экранами \\uXXXX.
 
-    Служба мессенджера кодирует русские буквы в имени экранами \\uXXXX; так это читал SmartBase.
+    Служба мессенджера кодирует русские буквы в имени экранами \\uXXXX.
     """
     if not header:
         return ""

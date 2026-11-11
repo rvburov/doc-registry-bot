@@ -1,4 +1,4 @@
-"""Справочник ЕСКД. Примеры перенесены из EskdCatalogTests SmartBase."""
+"""Справочник ЕСКД."""
 
 import pytest
 

@@ -1,4 +1,4 @@
-"""Связь со службой мессенджера: запросы как у SmartBase, файлы блоками, поток STOMP."""
+"""Связь со службой мессенджера: запросы, файлы блоками, поток STOMP."""
 
 import asyncio
 import json
@@ -140,7 +140,7 @@ async def test_file_ids_come_in_any_shape(value: Any, ids: list[int]) -> None:
     assert client.file_ids_of(value) == ids
 
 
-async def test_stomp_frames_repeat_smartbase() -> None:
+async def test_stomp_frames_are_connect_and_subscribe() -> None:
     connect, subscribe = stomp.greeting("localhost", ["/topic/messages"])
     assert connect == "CONNECT\naccept-version:1.2,1.1,1.0\nhost:localhost\nheart-beat:0,0\n\n\x00"
     assert subscribe == "SUBSCRIBE\nid:sub-0\ndestination:/topic/messages\nack:auto\n\n\x00"
