@@ -134,6 +134,7 @@ rollback() {
   local previous
   previous=$(sed -n 's/^PREVIOUS=//p' "$STATE")
   [ -n "$previous" ] || fail "предыдущая версия неизвестна"
+  docker compose config -q || fail "ошибка в compose.yaml или .env, откат не начат"
   docker image inspect "doc-registry-bot:$previous" >/dev/null 2>&1 \
     || fail "образа doc-registry-bot:$previous нет на сервере"
   printf 'PREVIOUS=%s\n' "$(current_version)" > "$STATE"

@@ -139,6 +139,9 @@ class Settings(BaseSettings):
             raise ValueError(f"{name}: путь должен начинаться с / или ./ (например, /mnt/e/Копии)")
         path = path.rstrip("/") or "/"
         parts = [part for part in path.split("/") if part]
+        if any(part == ".." for part in parts) or (parts[:1] == ["."] and len(parts) == 1):
+            raise ValueError(f"{name}: путь без «..»: укажите папку для копий прямо")
+        parts = [part for part in parts if part != "."]
         whole_disk = parts[:1] == ["mnt"] and len(parts) <= 2
         if not parts or whole_disk or (len(parts) == 1 and parts[0] in _SYSTEM):
             raise ValueError(

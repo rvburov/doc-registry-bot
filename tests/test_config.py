@@ -95,6 +95,8 @@ def test_backup_folders_and_the_bot_folder(monkeypatch: pytest.MonkeyPatch) -> N
         ("/", "весь диск или системная папка"),
         ("/mnt/e", "весь диск или системная папка"),
         ("/etc", "весь диск или системная папка"),
+        ("/mnt/e/..", "без «..»"),
+        ("./../../..", "без «..»"),
     ],
 )
 def test_a_bad_backup_folder_stops_the_bot(
