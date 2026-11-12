@@ -440,9 +440,13 @@ class BotService:
                 asked = await pending.asked_at(session, owner)
                 if asked is None or mine.sent_at is None or asked <= mine.sent_at:
                     return False
-            recent = mine is not None and mine.tried_at is not None
-            if recent and mine.status == "failed" and now - mine.tried_at < REMINDER_RETRY:  # type: ignore[union-attr,operator]
-                return False
+            if (
+                mine is not None
+                and mine.status == "failed"
+                and mine.tried_at is not None
+                and now - mine.tried_at < REMINDER_RETRY
+            ):
+                return False  # неудачная отправка повторяется не чаще раза в 10 минут
             # Владелец посреди другой операции: его «Да» относилось бы к ней. Подождем.
             busy = await session.scalar(
                 select(Pending.user_id).where(Pending.user_id == owner, Pending.expires_at > now)

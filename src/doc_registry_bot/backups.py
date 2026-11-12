@@ -126,12 +126,13 @@ async def _enqueue(
     }
     async with sessions() as session, session.begin():
         if job_id is not None:
-            changed = await session.execute(
+            changed = await session.scalar(
                 update(BackupJob)
                 .where(BackupJob.id == job_id, BackupJob.status == "requested")
                 .values(**values)
+                .returning(BackupJob.id)
             )
-            if changed.rowcount != 1:  # type: ignore[attr-defined]
+            if changed is None:
                 raise RuntimeError(f"заявка на копию {job_id} уже не ждет выполнения")
             return job_id
         job = BackupJob(
@@ -178,14 +179,18 @@ async def wait(sessions: async_sessionmaker[AsyncSession], job_id: int) -> Backu
         if waited > PICKUP_SECONDS:
             age = await worker_age(sessions)
             stopped = age is None or age > ALIVE_SECONDS
+            # Заявку могли взять или закончить за это время: _close меняет только ожидаемый
+            # статус, а итог перечитывается на следующем круге.
             if job.status == "new" and (stopped or waited > QUEUE_SECONDS):
-                why = NOT_PICKED if stopped else QUEUE_BUSY
-                if await _close(sessions, job_id, ("new",), "canceled", why):
-                    continue
+                await _close(
+                    sessions, job_id, ("new",), "canceled", NOT_PICKED if stopped else QUEUE_BUSY
+                )
+                continue
             if job.status == "running" and (stopped or waited > RUN_SECONDS):
-                why = STOPPED if stopped else TOO_LONG
-                if await _close(sessions, job_id, ("running",), "failed", why):
-                    continue
+                await _close(
+                    sessions, job_id, ("running",), "failed", STOPPED if stopped else TOO_LONG
+                )
+                continue
         await asyncio.sleep(POLL_SECONDS)
 
 
@@ -195,9 +200,9 @@ async def _close(
     statuses: tuple[str, ...],
     status: str,
     message: str,
-) -> bool:
+) -> None:
     async with sessions() as session, session.begin():
-        changed = await session.execute(
+        await session.execute(
             update(BackupJob)
             .where(BackupJob.id == job_id, BackupJob.status.in_(statuses))
             .values(
@@ -208,7 +213,6 @@ async def _close(
                 finished_at=func.now(),
             )
         )
-        return bool(changed.rowcount)  # type: ignore[attr-defined]
 
 
 async def verify(

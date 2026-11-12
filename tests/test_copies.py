@@ -226,6 +226,30 @@ async def test_a_stopped_container_cancels_the_request(
     assert job.status == "canceled"
 
 
+async def test_a_request_closed_before_the_container_got_it_is_not_made(
+    stand: Stand, container: FakeContainer
+) -> None:
+    # Заявку из чата закрыли (например, разбор после перезапуска) раньше, чем бот снял снимок.
+    async with stand.db() as session, session.begin():
+        job = BackupJob(
+            kind="backup",
+            source="chat",
+            requested_by=OWNER,
+            folder_key="1",
+            status="canceled",
+            created_at=stand.now,
+        )
+        session.add(job)
+        await session.flush()
+        job_id = job.id
+    request = backups.Request(Choice(FOLDERS[0]), "chat", OWNER, "Владельцев В. В.")
+    with pytest.raises(RuntimeError, match="уже не ждет выполнения"):
+        await backups.make(stand.db, ZoneInfo("Europe/Moscow"), request, stand.now, job_id=job_id)
+    [closed] = await jobs(stand)
+    assert closed.status == "canceled" and closed.snapshot is None
+    assert container.done == 0
+
+
 async def test_dump_and_csv_are_taken_at_the_same_moment(
     stand: Stand, container: FakeContainer
 ) -> None:
