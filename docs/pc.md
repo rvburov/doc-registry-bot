@@ -559,6 +559,25 @@ cd deploy
 Файл для сервера — тот же `dist/doc-registry-bot-<версия>.tar.gz`, отправка по `scp` из этого же
 терминала: [server.md](server.md), шаг 6.
 
+**Если `scripts/build.sh` не может скачать библиотеки** (ошибка `Failed to download` или
+`operation timed out`: сеть закрывает каталог библиотек Python), возьмите готовый файл, который
+собирает GitHub после каждой отправки в `master`:
+
+1. В браузере откройте https://github.com/rvburov/doc-registry-bot/actions (нужно войти в GitHub).
+2. Верхняя строка с веткой `master` и зеленой галочкой → внизу страницы раздел **Artifacts** →
+   `doc-registry-bot-<версия>`. Скачается zip-архив около 200 МБ.
+3. Распакуйте его в Проводнике, например в `E:\bot-files\сборка`. Внутри
+   `doc-registry-bot-<версия>.tar.gz`, `compose.yaml`, скрипты и `.env.example`.
+4. В терминале VS Code:
+
+   ```bash
+   cd /mnt/e/doc-registry-bot/deploy
+   ./update.sh /mnt/e/bot-files/сборка/doc-registry-bot-1.2.0.tar.gz
+   ```
+
+Файл хранится на GitHub 30 дней; тот же файл годится и для сервера. Тесты перед ним прошли на
+GitHub: если проверка красная, файла нет.
+
 ## 18. Если не получается
 
 | Что видно | Что сделать |

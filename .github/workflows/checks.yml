@@ -47,14 +47,35 @@ jobs:
 
   images:
     name: Сборка образов
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Версия
+        run: echo "VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)" >> "$GITHUB_ENV"
       - name: Образ бота
-        run: docker build -t doc-registry-bot:ci .
+        run: docker build -t "doc-registry-bot:$VERSION" .
       - name: Образ копии
-        run: docker build -t doc-registry-backup:ci deploy/backup
+        run: docker build -t "doc-registry-backup:$VERSION" deploy/backup
       - name: Бот запускается
-        run: test "$(docker run --rm doc-registry-bot:ci version)" = "$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+        run: test "$(docker run --rm "doc-registry-bot:$VERSION" version)" = "$VERSION"
       - name: Скрипты без синтаксических ошибок
-        run: bash -n scripts/build.sh deploy/update.sh deploy/backup/backup.sh
+        run: for f in scripts/build.sh deploy/*.sh deploy/backup/backup.sh; do bash -n "$f"; done
+      # Файл для установки (как у scripts/build.sh): для ПК без доступа к каталогу библиотек
+      # Python. Только для master: скачать на странице запуска, раздел Artifacts.
+      - name: Файл для установки
+        if: github.ref == 'refs/heads/master'
+        run: |
+          docker pull postgres:16
+          mkdir -p dist
+          docker save "doc-registry-bot:$VERSION" "doc-registry-backup:$VERSION" postgres:16 | gzip > "dist/doc-registry-bot-$VERSION.tar.gz"
+          cp deploy/compose.yaml deploy/*.sh deploy/.env.example dist/
+      - name: Выложить файл
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-registry-bot-${{ env.VERSION }}
+          path: dist/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 30
