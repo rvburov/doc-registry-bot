@@ -162,12 +162,12 @@ Docker `messenger`, а в ней у службы постоянное имя `me
 docker network create messenger
 ```
 
-Имена контейнеров: `docker ps --format '{{.Names}}'`. Найдите службу мессенджера. Дальше вместо
-`ИМЯ` — ее имя.
+**Имя контейнера мессенджера:** `docker ps --format '{{.Names}}'`, в списке найдите контейнер
+службы мессенджера. Во всех командах ниже вместо `ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА` подставьте это имя.
 
 ```bash
-docker port ИМЯ
-docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' ИМЯ
+docker port ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА
+docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА
 ```
 
 - `docker port` покажет строку вида `8888/tcp -> 0.0.0.0:8888`. Число слева — порт службы внутри
@@ -222,8 +222,11 @@ docker compose up -d
 **Служба запущена без compose (пусто):**
 
 ```bash
-docker network connect --alias messenger-api messenger ИМЯ
+docker network connect --alias messenger-api messenger ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА
 ```
+
+Команда включает контейнер мессенджера в сеть `messenger` и дает ему постоянное имя
+`messenger-api`, по которому его найдет бот. Если все в порядке, она ничего не выводит.
 
 Если контейнер службы когда-нибудь пересоздадут (обновят), повторите эту команду.
 
@@ -231,7 +234,7 @@ docker network connect --alias messenger-api messenger ИМЯ
 
 ```bash
 docker network inspect messenger --format '{{range .Containers}}{{.Name}} {{end}}'
-docker inspect -f '{{json .NetworkSettings.Networks.messenger.Aliases}}' ИМЯ
+docker inspect -f '{{json .NetworkSettings.Networks.messenger.Aliases}}' ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА
 ```
 
 Первая показывает имя службы, вторая — список имен, в котором есть `"messenger-api"`. Имя
@@ -281,7 +284,7 @@ openssl rand -hex 24
 | `BOT_VERSION` | версию, например `1.2.0` | имя файла образов из шага 6 |
 | `MESSENGER_URL` | `http://messenger-api:8888` | имя из шага 4; если порт в шаге 4 не `8888` — свой порт |
 | `MESSENGER_NETWORK` | `messenger` | не менять |
-| `OWNER_IDS` | ваш userId | как в `.env` на ПК; или `./contacts.sh \| grep Фамилия` после шага 4 |
+| `OWNER_IDS` | ваш userId | как в `.env` на ПК; или `./contacts.sh \| grep Фамилия` после шага 8 (нужен загруженный образ) |
 | `ORG_CODES` | коды организации | как в `.env` на ПК |
 | `POSTGRES_DB`, `POSTGRES_USER` | оставить `doc_registry` | |
 | `POSTGRES_PASSWORD` | новый пароль базы сервера | строка от `openssl rand -hex 24`; пароль с ПК не нужен |
@@ -425,10 +428,10 @@ cd /opt/doc-registry-bot
 
 ## 13. Порт 8888 службы мессенджера
 
-Кто сейчас подключен к службе (на сервере, вместо `ИМЯ` — имя службы):
+Кто сейчас подключен к службе (на сервере, вместо `ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА` — имя контейнера службы мессенджера из `docker ps`):
 
 ```bash
-sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' ИМЯ)" -n ss -tn state established '( sport = :8888 )'
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' ИМЯ_КОНТЕЙНЕРА_МЕССЕНДЖЕРА)" -n ss -tn state established '( sport = :8888 )'
 ```
 
 В столбце `Peer Address` адреса подключенных. `172.…` — бот и другие контейнеры Docker,
