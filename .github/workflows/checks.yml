@@ -49,6 +49,8 @@ jobs:
     name: Сборка образов
     needs: checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Версия
@@ -60,22 +62,21 @@ jobs:
       - name: Бот запускается
         run: test "$(docker run --rm "doc-registry-bot:$VERSION" version)" = "$VERSION"
       - name: Скрипты без синтаксических ошибок
-        run: for f in scripts/build.sh deploy/*.sh deploy/backup/backup.sh; do bash -n "$f"; done
-      # Файл для установки (как у scripts/build.sh): для ПК без доступа к каталогу библиотек
-      # Python. Только для master: скачать на странице запуска, раздел Artifacts.
+        run: for f in scripts/*.sh deploy/*.sh deploy/backup/backup.sh; do bash -n "$f"; done
+      # Файл для установки (как у scripts/build.sh) в Releases, тег v<версия>: его скачивает
+      # scripts/download.sh на ПК без доступа к каталогу библиотек Python. Только для master;
+      # та же версия после новых правок заменяет файл.
       - name: Файл для установки
         if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           docker pull postgres:16
           mkdir -p dist
-          docker save "doc-registry-bot:$VERSION" "doc-registry-backup:$VERSION" postgres:16 | gzip > "dist/doc-registry-bot-$VERSION.tar.gz"
-          cp deploy/compose.yaml deploy/*.sh deploy/.env.example dist/
-      - name: Выложить файл
-        if: github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v4
-        with:
-          name: doc-registry-bot-${{ env.VERSION }}
-          path: dist/
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 30
+          name="doc-registry-bot-$VERSION.tar.gz"
+          docker save "doc-registry-bot:$VERSION" "doc-registry-backup:$VERSION" postgres:16 | gzip > "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          gh release view "v$VERSION" >/dev/null 2>&1 \
+            || gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Регистрация КД $VERSION" \
+              --notes "Файл для установки: scripts/download.sh, затем deploy/update.sh (docs/pc.md)."
+          gh release upload "v$VERSION" "dist/$name" "dist/$name.sha256" --clobber

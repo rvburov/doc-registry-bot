@@ -216,7 +216,8 @@ ID;ФИО
 
 ## 6. Обновление
 
-На ПК: `git pull`, `scripts/build.sh`, затем
+На ПК: `git pull`, `scripts/download.sh` (готовый файл с GitHub; собрать самому —
+`scripts/build.sh`), затем
 
 ```bash
 scp dist/doc-registry-bot-1.3.0.tar.gz пользователь@сервер:/opt/doc-registry-bot/
