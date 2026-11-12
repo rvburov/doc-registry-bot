@@ -276,8 +276,15 @@ def event_items(body: str) -> tuple[str, list[dict[str, Any]]]:
         return "", []
     if not isinstance(data, dict):
         return "", []
-    items = data.get("data")
-    rows = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-    if isinstance(items, dict):
-        rows = [items]
+    rows: list[dict[str, Any]] = []
+
+    def collect(value: Any) -> None:
+        # Служба присылает строки и списком, и списком списков: "data": [[{...}]].
+        if isinstance(value, dict):
+            rows.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(data.get("data"))
     return str(data.get("type") or ""), rows
