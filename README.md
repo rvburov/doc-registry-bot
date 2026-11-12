@@ -48,7 +48,8 @@ docker compose -f tests/compose.yaml up -d   # PostgreSQL для тестов н
 uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest
 ```
 
-Сборка образов и файла для сервера — `scripts/build.sh` (на ПК пользователя).
+Файл для установки собирает GitHub после зеленых проверок (Actions → Artifacts), на ПК он
+скачивается в браузере ([pc.md](docs/pc.md), шаг 5). Собрать самому — `scripts/build.sh`.
 
 ## Устройство
 

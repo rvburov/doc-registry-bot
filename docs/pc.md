@@ -178,25 +178,41 @@ git clone https://github.com/rvburov/doc-registry-bot.git
 Если VS Code предложит установить расширение **WSL**, можно согласиться или отказаться: для этой
 инструкции оно не нужно.
 
-## 5. Сборка
+## 5. Файл бота
 
-В терминале VS Code:
+Бота собирает GitHub после каждой отправки в `master`, если все проверки прошли. На ПК его не
+нужно собирать: файл скачивается в браузере.
+
+Сначала обновите код в терминале VS Code (если код вы обновляете со стороны Windows, пропустите):
 
 ```bash
 cd /mnt/e/doc-registry-bot
 git pull
-docker compose -f tests/compose.yaml up -d
-scripts/build.sh
 ```
 
-- `git pull` забирает последние изменения кода, в том числе скриптов в `deploy`.
-- Третья строка поднимает PostgreSQL для тестов (порт 5457). Если он уже работает, команда ничего
-  не меняет.
-- `scripts/build.sh` прогоняет проверки и тесты и собирает образы. Первый раз дольше: скачивает
-  Python, библиотеки и образ PostgreSQL.
+Затем файл:
 
-Последние строки: `Собрано: dist/doc-registry-bot-1.2.0.tar.gz`. Число в имени — версия, она нужна
-дальше.
+1. В браузере откройте https://github.com/rvburov/doc-registry-bot/actions и войдите в GitHub
+   (без входа файл не скачать).
+2. Нажмите верхнюю строку с зеленой галочкой и веткой `master`.
+3. Внизу страницы, в разделе **Artifacts**, нажмите `doc-registry-bot-<версия>`. Скачается
+   zip-архив около 200 МБ.
+4. Распакуйте его в Проводнике в папку `E:\doc-registry-bot\dist` (создайте ее, если нет;
+   «Извлечь все» → указать эту папку). Внутри `doc-registry-bot-<версия>.tar.gz`,
+   `compose.yaml`, скрипты и `.env.example`.
+
+Проверка в терминале:
+
+```bash
+ls /mnt/e/doc-registry-bot/dist
+```
+
+В списке есть `doc-registry-bot-1.2.0.tar.gz`. Число в имени — версия, она нужна дальше. Файл
+хранится на GitHub 30 дней, потом его нет: тогда берите следующий запуск с зеленой галочкой.
+
+Собрать файл самому тоже можно (`docker compose -f tests/compose.yaml up -d`, затем
+`scripts/build.sh`), но для этого нужен доступ к каталогу библиотек Python (pypi.org). Если сеть
+его закрывает, будет ошибка `Failed to download`.
 
 ## 6. Связь со службой мессенджера (один раз)
 
@@ -258,7 +274,7 @@ openssl rand -hex 24
 
 | Строка | Что вписать | Откуда взять |
 |---|---|---|
-| `BOT_VERSION` | версию, например `1.2.0` | строка «Собрано: dist/doc-registry-bot-1.2.0.tar.gz» в конце шага 5 |
+| `BOT_VERSION` | версию, например `1.2.0` | имя файла `dist/doc-registry-bot-1.2.0.tar.gz` из шага 5 |
 | `MESSENGER_URL` | `http://messenger-api:8888` | имя из шага 6; если порт в шаге 6 не `8888` — свой порт |
 | `MESSENGER_NETWORK` | `messenger` | не менять |
 | `OWNER_IDS` | ваш userId | знаете — впишите; не знаете — ниже, `./contacts.sh` |
@@ -545,46 +561,33 @@ docker volume rm doc-registry-bot_db-data
 
 ## 17. Обновление на ПК
 
-```bash
-cd /mnt/e/doc-registry-bot
-git pull
-scripts/build.sh
-cd deploy
-./update.sh ../dist/doc-registry-bot-1.3.0.tar.gz
-```
+1. Обновите код (если обновляете со стороны Windows, пропустите):
 
-Вместо `1.3.0` — версия из строки «Собрано: …». Скрипты в `deploy` обновляет `git pull`,
-копировать ничего не нужно. Откат на прежнюю версию: `./update.sh --rollback`.
+   ```bash
+   cd /mnt/e/doc-registry-bot
+   git pull
+   ```
 
-Файл для сервера — тот же `dist/doc-registry-bot-<версия>.tar.gz`, отправка по `scp` из этого же
-терминала: [server.md](server.md), шаг 6.
-
-**Если `scripts/build.sh` не может скачать библиотеки** (ошибка `Failed to download` или
-`operation timed out`: сеть закрывает каталог библиотек Python), возьмите готовый файл, который
-собирает GitHub после каждой отправки в `master`:
-
-1. В браузере откройте https://github.com/rvburov/doc-registry-bot/actions (нужно войти в GitHub).
-2. Верхняя строка с веткой `master` и зеленой галочкой → внизу страницы раздел **Artifacts** →
-   `doc-registry-bot-<версия>`. Скачается zip-архив около 200 МБ.
-3. Распакуйте его в Проводнике, например в `E:\bot-files\сборка`. Внутри
-   `doc-registry-bot-<версия>.tar.gz`, `compose.yaml`, скрипты и `.env.example`.
-4. В терминале VS Code:
+2. Скачайте новый файл так же, как в шаге 5, и распакуйте в `E:\doc-registry-bot\dist`.
+3. Запустите обновление (вместо `1.3.0` — версия из имени файла):
 
    ```bash
    cd /mnt/e/doc-registry-bot/deploy
-   ./update.sh /mnt/e/bot-files/сборка/doc-registry-bot-1.2.0.tar.gz
+   ./update.sh ../dist/doc-registry-bot-1.3.0.tar.gz
    ```
 
-Файл хранится на GitHub 30 дней; тот же файл годится и для сервера. Тесты перед ним прошли на
-GitHub: если проверка красная, файла нет.
+`update.sh` делает копию базы, загружает образы, перезапускает бота и проверяет версию: строка
+«Бот работает, версия 1.3.0.». Откат на прежнюю версию: `./update.sh --rollback`.
+
+Файл для сервера — тот же `dist/doc-registry-bot-<версия>.tar.gz`, отправка по `scp` из этого же
+терминала: [server.md](server.md), шаг 6.
 
 **`.env` при обновлении не трогайте.** `update.sh` берет ваш `deploy\.env` (пароль базы,
 `OWNER_IDS`, адрес службы) и сам меняет в нем только `BOT_VERSION`. `.env.example` из архива —
 только образец: не копируйте его поверх `.env`, иначе пропадут настройки и пароль базы. Журнал и
 пользователи хранятся в базе в Docker и при обновлении остаются.
 
-- `compose.yaml` и скрипты в `deploy` должны быть той же версии, что и файл: обновите код
-  (`git pull`) или скопируйте `compose.yaml` и `*.sh` из архива в `deploy` с заменой.
+- `compose.yaml` и скрипты в `deploy` обновляет `git pull`, копировать их из архива не нужно.
 - Новые строки версии 1.2.0 (`BACKUP_DIR_*`, `BACKUP_REMINDER_*`) не обязательны: без них копии
   идут в `deploy\backups`, напоминание в понедельник в 10:00 по Москве. Нужны другие — шаг 14.
 - Строки `BACKUP_TIME` и `BACKUP_KEEP_DAYS` больше не используются, их можно удалить.
@@ -597,6 +600,7 @@ GitHub: если проверка красная, файла нет.
 | `permission denied` и `docker.sock` | `sudo usermod -aG docker $USER`, закройте терминал, откройте снова |
 | `network messenger ... not found` | шаг 6 |
 | `Ошибка: нет файла .env` | вы не в рабочей папке: `cd /mnt/e/doc-registry-bot/deploy` |
+| `build.sh`: `Failed to download` | сеть закрывает pypi.org: файл не собирайте, а скачайте (шаг 5) |
 | тесты в `build.sh` падают на базе | `docker compose -f tests/compose.yaml up -d` в папке проекта |
 | `$'\r': command not found` | код скачан в Windows со старыми переводами строк: в папке проекта `git rm -rq --cached . && git reset -q --hard` (ваши правки в коде пропадут) |
 | `git pull` пишет об изменениях, которых вы не делали | `git config core.fileMode false` и повторите |

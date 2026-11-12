@@ -19,20 +19,18 @@
 - **Сведения:** ваш числовой `userId` в мессенджере, коды организации, сетевая папка для копий
   и учетная запись с правом записи в нее.
 
-## 2. Сборка на ПК
+## 2. Файл бота на ПК
 
-```bash
-cd /mnt/e/doc-registry-bot
-git pull
-scripts/build.sh
-```
-
-Скрипт прогоняет проверки и тесты, собирает образы и пишет в `dist/`:
+Файл собирает GitHub после зеленых проверок каждой отправки в `master`: страница
+https://github.com/rvburov/doc-registry-bot/actions, верхний запуск `master` с зеленой галочкой,
+раздел **Artifacts** (хранится 30 дней). Архив распакуйте в `E:\doc-registry-bot\dist`
+(подробно — [pc.md](pc.md), шаг 5). Собрать самому — `git pull`, `scripts/build.sh` (нужен
+доступ к pypi.org). В `dist/`:
 
 - `doc-registry-bot-<версия>.tar.gz` — образы бота, копии и PostgreSQL одним файлом;
 - `compose.yaml`, `update.sh`, `backup.sh`, `import.sh`, `users.sh`, `.env.example`.
 
-Тесты базы нуждаются в PostgreSQL: перед первой сборкой
+Для `build.sh` тестам базы нужен PostgreSQL: перед первой сборкой
 `docker compose -f tests/compose.yaml up -d`.
 
 ## 3. Подготовка сервера (один раз)
@@ -216,7 +214,7 @@ ID;ФИО
 
 ## 6. Обновление
 
-На ПК: `git pull`, `scripts/build.sh`, затем
+На ПК: `git pull` и новый файл с GitHub в `dist` (раздел 2), затем
 
 ```bash
 scp dist/doc-registry-bot-1.3.0.tar.gz пользователь@сервер:/opt/doc-registry-bot/
