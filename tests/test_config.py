@@ -66,3 +66,55 @@ def test_a_missing_database_password_stops_the_bot(monkeypatch: pytest.MonkeyPat
         monkeypatch.setenv(key, GOOD[key])
     with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+# ── Папки копий и напоминание ─────────────────────────────────────────────────
+
+
+def test_backup_folders_and_the_bot_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = settings(
+        monkeypatch,
+        BOT_DIR="/mnt/e/doc-registry-bot/deploy",
+        BACKUP_DIR_2="/mnt/e/Копии",
+        BACKUP_DIR_2_NAME="Архив",
+        BACKUP_SHARE="//fileserver/копии",
+    )
+    labels = [folder.label() for folder in result.folders]
+    assert labels == [
+        "Основная (E:\\doc-registry-bot\\deploy\\backups)",
+        "Архив (E:\\Копии)",
+        "Сетевая папка (//fileserver/копии)",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "problem"),
+    [
+        ("E:\\Копии", "без двоеточия"),
+        ("копии", "должен начинаться с / или ./"),
+        ("/", "весь диск или системная папка"),
+        ("/mnt/e", "весь диск или системная папка"),
+        ("/etc", "весь диск или системная папка"),
+    ],
+)
+def test_a_bad_backup_folder_stops_the_bot(
+    monkeypatch: pytest.MonkeyPatch, value: str, problem: str
+) -> None:
+    with pytest.raises(ValidationError) as error:
+        settings(monkeypatch, BACKUP_DIR_2=value)
+    assert problem in str(error.value)
+
+
+def test_the_reminder_schedule_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = settings(
+        monkeypatch,
+        BACKUP_REMINDER_DAY="ср",
+        BACKUP_REMINDER_TIME="09:30",
+        BACKUP_REMINDER_ZONE="Asia/Yekaterinburg",
+    )
+    assert result.reminder is not None
+    assert result.reminder.describe() == "среда, 09:30 (Asia/Yekaterinburg)"
+    assert settings(monkeypatch, BACKUP_REMINDER_DAY="нет").reminder is None
+    for key, value in (("BACKUP_REMINDER_DAY", "пнд"), ("BACKUP_REMINDER_ZONE", "Луна/Море")):
+        with pytest.raises(ValidationError):
+            settings(monkeypatch, **{key: value})

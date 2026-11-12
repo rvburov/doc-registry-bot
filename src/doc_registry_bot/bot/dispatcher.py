@@ -5,13 +5,15 @@
 """
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from doc_registry_bot.bot import commands, documents, pending, registration
-from doc_registry_bot.bot.context import BotConfig, Ctx
+from doc_registry_bot.bot import commands, copies, documents, pending, registration
+from doc_registry_bot.bot.context import BotConfig, Ctx, Task, now_utc, server_time
 from doc_registry_bot.bot.people import Role, person_of, remember, role_of
 from doc_registry_bot.bot.registration import refused, refused_headed
 from doc_registry_bot.bot.types import Incoming, Messenger, MessengerError, Reply
@@ -28,16 +30,40 @@ WITHOUT_INSTRUCTION = "без инструкции"
 _ANY_FULL_NAME = "Проверка Полного Имени"
 
 
+@dataclass(frozen=True)
+class Handled:
+    """Итог сообщения: ответы и дела после коммита (их запускает служба)."""
+
+    replies: list[Reply] = field(default_factory=list)
+    tasks: list[Task] = field(default_factory=list)
+
+
 class Dispatcher:
     def __init__(
-        self, sessions: async_sessionmaker[AsyncSession], config: BotConfig, messenger: Messenger
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        config: BotConfig,
+        messenger: Messenger,
+        clock: Callable[[], datetime] = now_utc,
     ) -> None:
         self._sessions = sessions
         self._config = config
         self._messenger = messenger
+        self.clock = clock
 
-    async def handle(self, incoming: Incoming, now: datetime) -> list[Reply]:
-        """Обработать сообщение; пустой список — оно уже было обработано раньше."""
+    def _ctx(self, session: AsyncSession, sender_id: int, now: datetime) -> Ctx:
+        return Ctx(
+            session,
+            self._config,
+            self._messenger,
+            sender_id,
+            now,
+            sessions=self._sessions,
+            clock=self.clock,
+        )
+
+    async def handle(self, incoming: Incoming, now: datetime) -> Handled:
+        """Обработать сообщение; пустой итог — оно уже было обработано раньше."""
         try:
             async with self._sessions() as session, session.begin():
                 fresh = await session.scalar(
@@ -51,14 +77,16 @@ class Dispatcher:
                     .returning(ProcessedMessage.message_id)
                 )
                 if fresh is None:
-                    return []
-                ctx = Ctx(session, self._config, self._messenger, incoming.sender_id, now)
+                    return Handled()
+                ctx = self._ctx(session, incoming.sender_id, now)
+                if incoming.ctime is not None:
+                    ctx.sent_at = server_time(incoming.ctime)
                 await route(ctx, incoming)
-                return ctx.replies
+                return Handled(ctx.replies, ctx.tasks)
         except Exception:
             log.exception("Сообщение %s не обработано", incoming.message_id)
             await self._mark_failed(incoming, now)
-            return [Reply(incoming.sender_id, FAILED)]
+            return Handled([Reply(incoming.sender_id, FAILED)])
 
     async def handle_stale(
         self, sender_id: int, message_ids: list[int], now: datetime
@@ -77,7 +105,7 @@ class Dispatcher:
                 fresh += inserted is not None
             if not fresh:
                 return []
-            ctx = Ctx(session, self._config, self._messenger, sender_id, now)
+            ctx = self._ctx(session, sender_id, now)
             role = await role_of(ctx, sender_id)
             if not role.can_register:
                 return []
@@ -122,7 +150,8 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
 
     found = await pending.current(ctx)
     if isinstance(found, Pending):
-        if await _answer_pending(ctx, role, found, plain, answer):
+        other = command is not None or bool(incoming.file_ids)
+        if await _answer_pending(ctx, role, found, plain, answer, other=other):
             return
         # Пока ждем ответа, доступны только справка и просмотр.
         if command is not None and command.word in commands.ALWAYS:
@@ -131,6 +160,14 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
             await documents.run(ctx, known, values)
         else:
             commands.pending_refusal(ctx, found.kind, found.payload)
+        return
+    # «Да» или «Нет» без ожидания: может быть ответом владельца на еженедельное напоминание.
+    if (
+        answer is not None
+        and role.owner
+        and (found is None or found == pending.EXPIRED)
+        and await copies.answer_reminder(ctx, answer)
+    ):
         return
     if answer is not None:
         if found == pending.EXPIRED:
@@ -154,10 +191,23 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
 
 
 async def _answer_pending(
-    ctx: Ctx, role: Role, found: Pending, plain: str, answer: bool | None
+    ctx: Ctx, role: Role, found: Pending, plain: str, answer: bool | None, *, other: bool
 ) -> bool:
     """Ответ на ожидание. False — сообщение ответом не является."""
     kind, payload = found.kind, dict(found.payload)
+    if kind in (copies.BACKUP_KIND, copies.REPLACE_KIND) and not role.owner:
+        if answer is None:
+            return False
+        await pending.take(ctx, found)
+        refused(ctx, commands.NO_RIGHTS)
+        return True
+    if kind == copies.BACKUP_KIND:
+        return await copies.answer_backup(ctx, found, plain, answer, other=other)
+    if kind == copies.REPLACE_KIND:
+        if answer is None:
+            return False
+        await copies.answer_replace(ctx, found, answer)
+        return True
     if kind in commands.PEOPLE_COMMANDS:
         without = kind == commands.GRANT and text.fold(plain) == WITHOUT_INSTRUCTION
         if answer is None and not without:

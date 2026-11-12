@@ -10,8 +10,9 @@ users.sh).
 import csv
 import hashlib
 import io
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from doc_registry_bot.bot.types import UserCard
 from doc_registry_bot.db import journal
-from doc_registry_bot.db.models import AuditEntry, JournalEntry, Member
+from doc_registry_bot.db.models import AuditEntry, BackupJob, JournalEntry, JournalUpload, Member
 from doc_registry_bot.registry import schema, workbook
 from doc_registry_bot.registry.text import collapse, same_name
 
@@ -28,6 +29,8 @@ _FORMATS = ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d %H:%M:%
 
 # Кто выполнил команду на сервере — в журнале действий.
 SERVER_ACTOR = "администратор сервера"
+# Резервная копия годится для замены журнала 30 минут: так у import.sh и так через чат.
+FRESH = timedelta(minutes=30)
 
 
 @dataclass
@@ -202,6 +205,87 @@ async def replace_journal(
                 actor_fio=SERVER_ACTOR,
                 action="Замена журнала из файла",
                 details=f"файл: {name}, было записей: {report.before}, стало: {len(entries)}",
+            )
+        )
+    return report
+
+
+# ── Замена журнала через чат ──────────────────────────────────────────────────
+
+
+def backup_fresh(backup: BackupJob, now: datetime) -> bool:
+    """Копия успешна (оба файла) и снята не раньше чем 30 минут назад.
+
+    Время — момент заявки по часам бота: снимок базы берется сразу после него, поэтому это и
+    есть момент, на который сняты данные. Часы бота, а не базы: и заявку, и проверку ведет бот.
+    """
+    return backup.successful and now - backup.created_at <= FRESH
+
+
+async def close_upload(
+    sessions: async_sessionmaker[AsyncSession], upload_id: int, status: str, message: str
+) -> None:
+    async with sessions() as session, session.begin():
+        upload = await session.get(JournalUpload, upload_id, with_for_update=True)
+        if upload is not None and upload.status in ("waiting", "confirmed"):
+            upload.status = status
+            upload.message = message
+            upload.finished_at = func.now()
+
+
+async def replace_upload(
+    sessions: async_sessionmaker[AsyncSession],
+    upload_id: int,
+    zone: ZoneInfo,
+    clock: Callable[[], datetime],
+    *,
+    actor_id: int,
+    actor_fio: str,
+) -> Report:
+    """Заменить журнал файлом из чата. Одна транзакция под блокировкой журнала: свежесть и
+    успешность копии и отпечаток журнала проверяются прямо перед заменой, регистрации ждут
+    ее конца; при любой ошибке журнал остается прежним."""
+    report = Report()
+    async with sessions() as session, session.begin():
+        await session.execute(sql("LOCK TABLE journal IN EXCLUSIVE MODE"))
+        upload = await session.get(JournalUpload, upload_id, with_for_update=True)
+        if upload is None or upload.status != "confirmed":
+            report.problems.append("файл уже обработан")
+            return report
+        backup = await session.get(BackupJob, upload.backup_id) if upload.backup_id else None
+        now = clock()
+
+        def refuse(message: str) -> Report:
+            assert upload is not None
+            upload.status = "refused"
+            upload.message = message
+            upload.finished_at = now
+            report.problems.append(message)
+            return report
+
+        if backup is None or not backup_fresh(backup, now):
+            return refuse("резервная копия устарела (старше 30 минут) или не сделана")
+        if fingerprint(await export_csv(session, zone)) != backup.fingerprint:
+            return refuse("журнал изменился после резервной копии")
+        entries, checked = read_journal(upload.data, upload.name, zone, now)
+        if not checked.ok:
+            return refuse("; ".join(checked.problems[:5]))
+        report.before = await journal.count(session)
+        await session.execute(delete(JournalEntry))
+        session.add_all(entries)
+        report.rows = len(entries)
+        upload.status = "done"
+        upload.finished_at = now
+        upload.message = f"Было записей: {report.before}, стало: {report.rows}."
+        session.add(
+            AuditEntry(
+                at=now,
+                actor_id=actor_id,
+                actor_fio=actor_fio,
+                action="Замена журнала из файла через чат",
+                details=f"файл: {upload.name}, было записей: {report.before}, стало: "
+                f"{report.rows}, копия до замены: {backup.folder_label}, {backup.dump_name}, "
+                f"{backup.csv_name}",
             )
         )
     return report

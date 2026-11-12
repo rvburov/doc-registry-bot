@@ -1,4 +1,4 @@
-# Образ ночной копии: pg_dump из образа PostgreSQL и smbclient для сетевой папки Windows.
+# Образ контейнера копий: pg_dump из образа PostgreSQL и smbclient для сетевой папки Windows.
 FROM postgres:16
 RUN apt-get update \
  && apt-get install -y --no-install-recommends smbclient \

@@ -3,7 +3,7 @@
 #
 #   scripts/build.sh
 #
-# Проверки → образы бота и ночной копии → один файл dist/doc-registry-bot-<версия>.tar.gz
+# Проверки → образы бота и контейнера копий → один файл dist/doc-registry-bot-<версия>.tar.gz
 # с образами бота, копии и PostgreSQL. Файл переносится на сервер по SSH вместе с
 # deploy/compose.yaml и deploy/update.sh и ставится командой ./update.sh <файл>.
 set -euo pipefail

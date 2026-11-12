@@ -3,7 +3,16 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, Text, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Index,
+    Integer,
+    LargeBinary,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -98,3 +107,105 @@ class BotState(Base):
 
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class BackupJob(Base):
+    """Резервная копия: заявка контейнеру копий и ее итог (`kind="backup"`) или проверка файлов
+    уже сделанной копии перед заменой журнала (`kind="verify"`, `target_id` — копия).
+
+    Заявку пишет бот, выполняет контейнер копий: забирает строку `status="new"` и пишет итог в
+    нее же. Копия успешна, только если `status="done"` и оба файла на месте (`dump_ok`, `csv_ok`).
+    `fingerprint` — SHA-256 файла CSV журнала: замена журнала сверяет с ним журнал в базе.
+    Статусы: requested (бот готовит), new (ждет контейнер), running, done, failed, canceled.
+    """
+
+    __tablename__ = "backup_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(Text, default="backup", server_default="backup")
+    target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(Text, default="chat", server_default="chat")
+    requested_by: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    requested_fio: Mapped[str] = mapped_column(Text, default="", server_default="")
+    folder_key: Mapped[str] = mapped_column(Text, default="", server_default="")
+    folder_label: Mapped[str] = mapped_column(Text, default="", server_default="")
+    subdir: Mapped[str] = mapped_column(Text, default="", server_default="")
+    dump_name: Mapped[str] = mapped_column(Text, default="", server_default="")
+    csv_name: Mapped[str] = mapped_column(Text, default="", server_default="")
+    csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fingerprint: Mapped[str] = mapped_column(Text, default="", server_default="")
+    rows: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    owner_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    owner_gid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default="requested", server_default="requested")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dump_ok: Mapped[bool] = mapped_column(default=False, server_default="false")
+    csv_ok: Mapped[bool] = mapped_column(default=False, server_default="false")
+    dump_size: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    csv_size: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    message: Mapped[str] = mapped_column(Text, default="", server_default="")
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Контрольная сумма DUMP (проверка перед заменой журнала) и путь папки на компьютере, куда
+    # контейнер копий на самом деле записал файлы (из его настроек, для отчета).
+    dump_sha256: Mapped[str] = mapped_column(Text, default="", server_default="")
+    host_path: Mapped[str] = mapped_column(Text, default="", server_default="")
+
+    __table_args__ = (Index("ix_backup_jobs_status", "status", "id"),)
+
+    @property
+    def successful(self) -> bool:
+        return self.kind == "backup" and self.status == "done" and self.dump_ok and self.csv_ok
+
+
+class JournalUpload(Base):
+    """Файл CSV для замены журнала через чат: ждет подтверждения владельца.
+
+    Статусы: waiting (ждет «Да»), confirmed (замена выполняется), done, refused, canceled.
+    """
+
+    __tablename__ = "journal_uploads"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    user_fio: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    name: Mapped[str] = mapped_column(Text)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    sha256: Mapped[str] = mapped_column(Text)
+    rows: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    backup_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default="waiting", server_default="waiting")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    message: Mapped[str] = mapped_column(Text, default="", server_default="")
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Reminder(Base):
+    """Еженедельное напоминание владельцу о резервной копии: срок, кому и доставлено ли.
+
+    Одна строка на срок и владельца (уникально): перезапуск бота не отправит его второй раз.
+    Статусы доставки: sending (отправляется), sent, failed (не дошло, будет повтор).
+    Ответ одного владельца закрывает напоминание у всех (`closed_at`, `answer`, `answered_by`).
+    """
+
+    __tablename__ = "reminders"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    owner_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(Text, default="sending", server_default="sending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    error: Mapped[str] = mapped_column(Text, default="", server_default="")
+    tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Последняя доставка (от нее сутки на ответ; напоминание повторяют, если после него владельцу
+    # задали другой вопрос) и первая: повторы идут только в первые сутки после нее.
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    answer: Mapped[str] = mapped_column(Text, default="", server_default="")
+    answered_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    __table_args__ = (UniqueConstraint("slot_at", "owner_id", name="uq_reminders_slot_owner"),)

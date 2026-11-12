@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from doc_registry_bot.bot import copies
 from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.bot.dispatcher import Dispatcher
 from doc_registry_bot.bot.types import Incoming, Reply
@@ -36,18 +37,36 @@ class Stand:
         self.messenger.person(STRANGER, "Чужов", "Степан", "Степанович")
 
     async def say(
-        self, sender: int, text: str, files: list[int] | None = None, message_id: int | None = None
+        self,
+        sender: int,
+        text: str,
+        files: list[int] | None = None,
+        message_id: int | None = None,
+        ctime: int | None = None,
     ) -> str:
         """Сообщение боту; ответ отправителю — разметкой, ответы разделены пустой строкой."""
         if message_id is None:
             self.message_id += 1
             message_id = self.message_id
-        self.replies = await self.dispatcher.handle(
-            Incoming(message_id, sender, text, files or []), self.now
+        self.dispatcher.clock = lambda: self.now
+        handled = await self.dispatcher.handle(
+            Incoming(message_id, sender, text, files or [], ctime), self.now
         )
+        self.replies = list(handled.replies)
+        # Дела после коммита на стенде выполняются сразу, по порядку, затем итоги.
+        for task in handled.tasks:
+            self.replies += await task()
+        if handled.tasks:
+            self.replies += await self.reports()
         for reply in self.replies:
             assert_human_text(markup.plain(reply.html))
         return "\n\n".join(r.html for r in self.replies if r.user_id == sender)
+
+    async def reports(self) -> list[Reply]:
+        """Итоги копий и замен журнала: на стенде отправка всегда удачна."""
+        config = self.dispatcher._config
+        items = await copies.claim_reports(self.db, config.zone, self.now, config.owner_ids)
+        return [Reply(item.user_id, item.html) for item in items]
 
     def later(self, minutes: int) -> None:
         self.now += timedelta(minutes=minutes)

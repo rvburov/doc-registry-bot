@@ -17,7 +17,17 @@ from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.db.session import engine_for, sessions, upgrade
 
 DEFAULT_URL = "postgresql+psycopg://postgres:postgres@localhost:5457/drb_test"
-TABLES = ("journal", "members", "pending", "processed_messages", "audit", "bot_state")
+TABLES = (
+    "journal",
+    "members",
+    "pending",
+    "processed_messages",
+    "audit",
+    "bot_state",
+    "backup_jobs",
+    "journal_uploads",
+    "reminders",
+)
 
 
 def database_url() -> str:

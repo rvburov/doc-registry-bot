@@ -39,7 +39,13 @@ class NewEntry:
 
 async def lock_series(session: AsyncSession, series: Sequence[str]) -> None:
     """Блокировка серий до конца транзакции. Порядок одинаковый у всех, чтобы не было взаимной
-    блокировки, когда двум заявкам нужны одни и те же серии."""
+    блокировки, когда двум заявкам нужны одни и те же серии.
+
+    Сначала — блокировка журнала на запись (ROW EXCLUSIVE): регистрации друг другу не мешают, но
+    замена всего журнала (EXCLUSIVE) и регистрация идут по очереди. Регистрация, пришедшая во
+    время замены, ждет ее конца и выбирает номер уже по новому журналу.
+    """
+    await session.execute(sql("LOCK TABLE journal IN ROW EXCLUSIVE MODE"))
     for key in sorted(set(series)):
         await session.execute(sql("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
 

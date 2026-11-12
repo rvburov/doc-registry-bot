@@ -11,7 +11,13 @@ from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.bot.types import HistoryMessage
 from doc_registry_bot.db.models import AuditEntry
 from doc_registry_bot.registry import markup
-from doc_registry_bot.service import LAST_CTIME, BotService, incoming_of, server_time
+from doc_registry_bot.service import (
+    LAST_CTIME,
+    RESTORED_AT,
+    BotService,
+    incoming_of,
+    server_time,
+)
 from tests.stand import OWNER, REGISTRAR, Stand, registration
 
 pytestmark = pytest.mark.asyncio
@@ -103,6 +109,24 @@ async def test_missed_messages_are_caught_up_and_old_ones_are_asked_again(
     assert len(await stand.designations()) == 2
 
 
+async def test_after_a_restore_older_messages_are_not_done_again(
+    stand: Stand, config: BotConfig
+) -> None:
+    """База восстановлена из копии: сообщения, выполненные до восстановления, не повторяются,
+    а пришедшие, пока бот стоял, выполняются."""
+    service = service_of(stand, config)
+    await service._set_state(LAST_CTIME, str(seconds(NOW - timedelta(hours=5))))
+    await service._set_state(RESTORED_AT, str(seconds(NOW - timedelta(hours=1))))
+    stand.messenger.histories[REGISTRAR] = [
+        HistoryMessage(1, REGISTRAR, registration(), seconds(NOW - timedelta(hours=3))),
+        HistoryMessage(2, REGISTRAR, registration(), seconds(NOW - timedelta(minutes=30))),
+    ]
+    await service.catch_up()
+    await drain(service)
+    assert await stand.designations() == ["АБВГ.301121.001", "АБВГ.301121.002"]
+    assert int(await service._state(LAST_CTIME) or 0) == seconds(NOW - timedelta(minutes=30))
+
+
 async def test_a_long_outage_is_reported_to_the_owner(stand: Stand, config: BotConfig) -> None:
     service = service_of(stand, config)
     await service.on_state(True)
@@ -142,8 +166,27 @@ async def test_a_backup_that_missed_the_share_is_reported_once(
     await service.check_backup()
     [note] = stand.messenger.sent
     assert markup.plain(note.html) == (
-        "Резервная копия сделана, но не попала в сетевую папку: сетевая папка недоступна"
+        "Защитная копия базы сделана, но не попала в сетевую папку: сетевая папка недоступна"
     )
+
+
+async def test_a_protective_copy_without_a_share_is_not_reported(
+    stand: Stand, config: BotConfig, tmp_path: Path
+) -> None:
+    status = tmp_path / "status.json"
+    status.write_text(
+        json.dumps(
+            {
+                "time": "2026-11-10T03:00:00",
+                "ok": True,
+                "share_ok": False,
+                "message": "сетевая папка не задана (BACKUP_SHARE)",
+            }
+        ),
+        encoding="utf-8",
+    )
+    await service_of(stand, config, backup_status=status).check_backup()
+    assert stand.messenger.sent == []
 
 
 async def test_cleaning_keeps_twelve_months_of_actions(stand: Stand, config: BotConfig) -> None:

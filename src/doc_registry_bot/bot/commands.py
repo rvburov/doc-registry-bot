@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 
 from doc_registry_bot import importer
-from doc_registry_bot.bot import pending
+from doc_registry_bot.bot import copies, pending
 from doc_registry_bot.bot.context import Ctx
 from doc_registry_bot.bot.people import (
     Person,
@@ -37,6 +37,9 @@ from doc_registry_bot.registry.markup import bold, escape
 HELP = "помощь"
 INSTRUCTION = "инструкция"
 ADMIN_INSTRUCTION = "инструкция администратора"
+OWNER_INSTRUCTION = "инструкция главного администратора"
+BACKUP = copies.BACKUP
+REPLACE = copies.REPLACE
 GRANT = "выдать доступ"
 REVOKE = "удалить доступ"
 USERS = "пользователи"
@@ -50,6 +53,7 @@ ADMINS = "администраторы"
 
 # Длинные раньше коротких: «инструкция администратора» не должна читаться как «инструкция».
 _ORDER = (
+    OWNER_INSTRUCTION,
     ADMIN_INSTRUCTION,
     INSTRUCTION,
     GRANT,
@@ -62,13 +66,16 @@ _ORDER = (
     ADMIN,
     UNADMIN,
     ADMINS,
+    BACKUP,
+    REPLACE,
     HELP,
 )
 _ADMIN_ONLY = {ADMIN_INSTRUCTION, GRANT, REVOKE, USERS, EXPORT, AUDIT, SEND, SEND_INSTRUCTION}
-_OWNER_ONLY = {ADMIN, UNADMIN, ADMINS}
+# Главный администратор (владелец из OWNER_IDS): администраторы, резервная копия, замена журнала.
+_OWNER_ONLY = {ADMIN, UNADMIN, ADMINS, OWNER_INSTRUCTION, BACKUP, REPLACE}
 
 # Доступны и тогда, когда бот ждет ответа на подтверждение.
-ALWAYS = (HELP, INSTRUCTION, ADMIN_INSTRUCTION)
+ALWAYS = (HELP, INSTRUCTION, ADMIN_INSTRUCTION, OWNER_INSTRUCTION)
 
 # Команды о людях: каждая ждет подтверждения, вид ожидания — слово команды.
 PEOPLE_COMMANDS = (GRANT, REVOKE, SEND, SEND_INSTRUCTION, ADMIN, UNADMIN)
@@ -143,10 +150,13 @@ def help_text(role: Role) -> str:
     if role.owner:
         lines += [
             "",
-            bold("Владельцу"),
+            bold("Главному администратору"),
+            "Инструкция главного администратора: как пользоваться командами ниже",
             "Назначить администратора: полное ФИО или ID",
             "Снять администратора: полное ФИО или ID",
             "Администраторы: список",
+            "Резервная копия: файл базы и журнал КД в выбранную папку",
+            "Заменить журнал: весь журнал КД из файла CSV во вложении",
         ]
     return "\n".join(lines)
 
@@ -165,6 +175,24 @@ async def _admin_instruction(
     ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int
 ) -> None:
     ctx.reply(instructions.ADMIN_TEXT)
+
+
+async def _owner_instruction(
+    ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int
+) -> None:
+    ctx.reply(instructions.OWNER_TEXT)
+
+
+async def _backup(
+    ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int
+) -> None:
+    await copies.backup_command(ctx, command.argument)
+
+
+async def _replace(
+    ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int
+) -> None:
+    await copies.replace_command(ctx, files, message_id)
 
 
 # ── Люди: поиск и подтверждение ───────────────────────────────────────────────
@@ -544,6 +572,18 @@ def pending_refusal(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
         )
     elif kind == GRANT:
         refused(ctx, "Ожидается ответ: Да, Без инструкции или Нет")
+    elif kind == copies.BACKUP_KIND:
+        refused(
+            ctx,
+            "Ожидается ответ о резервной копии: Да, номер другой папки или Нет. "
+            "Для нового запроса сначала ответьте Нет",
+        )
+    elif kind == copies.REPLACE_KIND:
+        refused(
+            ctx,
+            "Ожидается подтверждение замены журнала: Да или Нет. "
+            "Для нового запроса сначала ответьте Нет",
+        )
     else:
         refused_headed(ctx, "Ожидается подтверждение. Для нового запроса сначала ответьте Нет")
 
@@ -554,6 +594,9 @@ _HANDLERS: dict[str, Handler] = {
     HELP: _help,
     INSTRUCTION: _instruction,
     ADMIN_INSTRUCTION: _admin_instruction,
+    OWNER_INSTRUCTION: _owner_instruction,
+    BACKUP: _backup,
+    REPLACE: _replace,
     GRANT: _people_command,
     REVOKE: _people_command,
     SEND_INSTRUCTION: _people_command,
