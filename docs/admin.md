@@ -24,8 +24,9 @@
 Файл собирает GitHub после зеленых проверок каждой отправки в `master`: страница
 https://github.com/rvburov/doc-registry-bot/actions, верхний запуск `master` с зеленой галочкой,
 раздел **Artifacts** (хранится 30 дней). Архив распакуйте в `E:\doc-registry-bot\dist`
-(подробно — [pc.md](pc.md), шаг 5). Собрать самому — `git pull`, `scripts/build.sh` (нужен
-доступ к pypi.org). В `dist/`:
+(оба способа получения файла пошагово — [pc.md, шаг 5](pc.md#5-файл-бота)). Сборка на своем ПК
+и установка готовой сборки из GitHub Actions с командами обновления приведены отдельно:
+[pc.md, шаг 17](pc.md#17-обновление-на-пк). В `dist/`:
 
 - `doc-registry-bot-<версия>.tar.gz` — образы бота, копии и PostgreSQL одним файлом;
 - `compose.yaml`, `update.sh`, `backup.sh`, `import.sh`, `users.sh`, `.env.example`.
