@@ -165,10 +165,19 @@ restore() {
     || fail "восстановление не удалось: база может быть пустой. Повторите команду или восстановите защитную копию"
   # Сообщения, отправленные до остановки бота, выполнены прежней базой: дочитывание истории их
   # не повторит. Пришедшие, пока бот стоял, он дочитает.
-  # $stopped — только цифры (date +%s). Базу и пользователя psql берет из окружения контейнера.
-  docker compose exec -T backup psql -X -q -v ON_ERROR_STOP=1 -c \
-    "INSERT INTO bot_state (key, value) VALUES ('restored_at', '$stopped') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value" \
-    </dev/null || fail "отметка восстановления не записана: не запускайте бота, повторите восстановление"
+  # Обе таблицы есть с первой версии схемы: запись остается и после восстановления старой
+  # копии. Отметка и действие сохраняются вместе, до запуска бота. Имя файла передается
+  # переменной psql: апострофы и другие символы не должны становиться частью команды SQL.
+  docker compose exec -T backup psql -X -q -v ON_ERROR_STOP=1 \
+    -v stopped="$stopped" -v dump="$dump" <<'SQL' \
+    || fail "отметка восстановления и запись журнала действий не сохранены: не запускайте бота, повторите восстановление"
+BEGIN;
+INSERT INTO bot_state (key, value) VALUES ('restored_at', :'stopped')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+INSERT INTO audit (at, actor_id, actor_fio, action, details)
+VALUES (now(), 0, 'администратор сервера', 'Восстановление из резервной копии', 'файл: ' || :'dump');
+COMMIT;
+SQL
   docker compose start bot
   check_started "$(current_version)"
 }

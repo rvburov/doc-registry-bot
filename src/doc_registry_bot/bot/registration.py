@@ -158,7 +158,7 @@ async def _snapshots(ctx: Ctx, pairs: list[tuple[str, str]]) -> list[Series]:
     ]
 
 
-async def _write(ctx: Ctx, rows: list[PlannedRow]) -> None:
+async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str = "") -> None:
     await journal.add_entries(
         ctx.session,
         [
@@ -176,6 +176,16 @@ async def _write(ctx: Ctx, rows: list[PlannedRow]) -> None:
         ],
         ctx.now,
     )
+    # Событие и сама регистрация сохраняются в одной транзакции, по одному на документ.
+    for row in rows:
+        details = (
+            f"{row.designation}; наименование: {row.name}; проект: {row.project}; способ: {source}"
+        )
+        if file_name:
+            details += f"; файл: {file_name}; строка: {row.line}"
+        elif source == "список":
+            details += f"; позиция: {row.line}"
+        ctx.audit("Регистрация записи", details)
 
 
 def _payload(kind_rows: list[PlannedRow], series: list[Series], **extra: Any) -> dict[str, Any]:
@@ -214,7 +224,7 @@ async def register(ctx: Ctx, request: RegistrationRequest) -> None:
         card = registered_card(planned, request, "Заявка на регистрацию")
         ctx.reply(f"{card}\n\n{warning}\n\n{markup.PROMPT}")
         return
-    await _write(ctx, [row])
+    await _write(ctx, [row], "сообщение")
     ctx.reply(registered_card(planned, request, REGISTERED))
 
 
@@ -266,7 +276,7 @@ async def register_batch(ctx: Ctx, batch: BatchRead) -> None:
         return
     new_series = [s for s in snapshots if not s.values]
     if not new_series:
-        await _write(ctx, rows)
+        await _write(ctx, rows, "список")
         ctx.reply(_batch_card(rows, f"Зарегистрировано: {len(rows)} из {len(rows)}."))
         return
     await pending.put(ctx, "batch", _payload(rows, snapshots))
@@ -338,7 +348,7 @@ async def register_file(ctx: Ctx, data: bytes, file_name: str) -> None:
         )
         return
     if all(s.values for s in snapshots):
-        await _write(ctx, rows)
+        await _write(ctx, rows, "файл", name)
         ctx.reply(_file_card(name, rows, f"Зарегистрировано: {len(rows)} из {len(rows)}."))
         return
     await pending.put(ctx, "file", _payload(rows, snapshots, file_name=name))
@@ -387,7 +397,8 @@ async def confirm(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
                 ],
             )
         return
-    await _write(ctx, rows)
+    source = {"register": "сообщение", "batch": "список", "file": "файл"}[kind]
+    await _write(ctx, rows, source, payload.get("file_name", ""))
     if kind == "register":
         request = RegistrationRequest(**payload["request"])
         ctx.reply(registered_card(rows[0].designation, request, REGISTERED))

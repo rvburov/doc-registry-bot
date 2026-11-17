@@ -71,16 +71,16 @@ class Ctx:
         """Выполнить после коммита, вне очереди сообщений."""
         self.tasks.append(task)
 
-    def audit(self, action: str, details: str = "") -> None:
-        self.session.add(
-            AuditEntry(
-                at=self.now,
-                actor_id=self.sender_id,
-                actor_fio=self.sender_fio,
-                action=action,
-                details=details,
-            )
+    def audit(self, action: str, details: str = "") -> AuditEntry:
+        entry = AuditEntry(
+            at=self.now,
+            actor_id=self.sender_id,
+            actor_fio=self.sender_fio,
+            action=action,
+            details=details,
         )
+        self.session.add(entry)
+        return entry
 
     def local(self, moment: datetime) -> str:
         """Момент по местному времени: «10.11.2026 14:05»."""

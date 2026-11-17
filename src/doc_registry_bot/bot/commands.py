@@ -441,11 +441,15 @@ async def _export(
 
 async def _audit(ctx: Ctx, command: Command, role: Role, files: list[int], message_id: int) -> None:
     since = ctx.now - timedelta(days=366)
+    exported = ctx.audit(
+        "Выгрузка журнала действий", f"период: {ctx.local(since)} - {ctx.local(ctx.now)}"
+    )
     rows = list(
         await ctx.session.scalars(
             select(AuditEntry).where(AuditEntry.at >= since).order_by(AuditEntry.at)
         )
     )
+    exported.details += f"; записей: {len(rows)}"
     data = importer.csv_bytes(
         ["Когда", "Кто", "ID", "Действие", "Подробности"],
         [[ctx.local(r.at), r.actor_fio, str(r.actor_id), r.action, r.details] for r in rows],
