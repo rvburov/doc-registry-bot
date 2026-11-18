@@ -12,14 +12,16 @@ from doc_registry_bot.bot.context import Ctx
 from doc_registry_bot.bot.registration import refused, refused_headed
 from doc_registry_bot.db import journal
 from doc_registry_bot.db.models import JournalEntry
-from doc_registry_bot.registry import markup, message, text
+from doc_registry_bot.registry import markup, message, schema, text
 from doc_registry_bot.registry.markup import bold, escape, struck
+from doc_registry_bot.registry.names import is_full_name
 
 VIEW = "Просмотр"
 DELETE = "Удаление"
 EDIT = "Изменение"
 CHOICES = "Регистрация, Просмотр, Удаление, Изменение"
-EDITABLE = ("Наименование", "Проект")
+OPTIONAL = (schema.ACCOUNTING, schema.FIRST_USE, schema.SUMMARY)
+EDITABLE = ("Наименование", "Проект", *OPTIONAL)
 EMPTY = "не указано"
 
 
@@ -50,16 +52,23 @@ class Card:
                 f"Номер: {bold(show(self.number))}",
                 f"Наименование: {mark(self.name, 'Наименование')}",
                 f"Проект: {mark(self.project, 'Проект')}",
-                f"ФИО: {show(self.fio)}",
+                f"ФИО: {mark(self.fio, 'ФИО')}",
                 f"Дата регистрации: {show(self.date)}",
-                f"Отметка учета: {show(self.accounting)}",
-                f"Примечание (первичное применение): {show(self.first_use)}",
-                f"Примечание (краткая характеристика): {show(self.summary)}",
+                f"Отметка учета: {mark(self.accounting, schema.ACCOUNTING)}",
+                f"Примечание (первичное применение): {mark(self.first_use, schema.FIRST_USE)}",
+                f"Примечание (краткая характеристика): {mark(self.summary, schema.SUMMARY)}",
             ]
         )
 
     def value(self, field: str) -> str:
-        return self.name if field == "Наименование" else self.project
+        return {
+            "Наименование": self.name,
+            "Проект": self.project,
+            "ФИО": self.fio,
+            schema.ACCOUNTING: self.accounting,
+            schema.FIRST_USE: self.first_use,
+            schema.SUMMARY: self.summary,
+        }[field]
 
 
 def card_of(ctx: Ctx, entry: JournalEntry) -> Card:
@@ -84,7 +93,9 @@ def known_action(action: str) -> str | None:
     return None
 
 
-async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
+async def run(
+    ctx: Ctx, action: str, values: list[tuple[str, str]], *, allow_fio: bool = False
+) -> None:
     """Просмотр, удаление или изменение. Ожидающая операция уже проверена вызывающим."""
     problems: list[str] = []
     number_text = text.value(values, message.NUMBER_KEY)
@@ -110,20 +121,32 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
             ):
                 continue
             if text.same_name(field, message.FIO_KEY):
-                problems.append(
-                    "ФИО: регистрирующий определяется по карточке отправителя и не изменяется "
-                    "командой."
-                )
+                if not allow_fio:
+                    problems.append(
+                        "ФИО: регистрирующий определяется по карточке отправителя и не изменяется "
+                        "командой."
+                    )
+                else:
+                    fio = text.collapse(value)
+                    if not fio:
+                        problems.append("ФИО: не указано значение")
+                    elif not is_full_name(fio):
+                        problems.append(
+                            "ФИО: укажите полные фамилию, имя и отчество, без инициалов"
+                        )
+                    else:
+                        changes[message.FIO_KEY] = fio
                 continue
             editable = next((f for f in EDITABLE if text.same_name(f, field)), None)
             if editable is None:
                 problems.append(f"{field}: изменение этого поля не поддерживается")
-            elif not value:
+            elif not value and editable not in OPTIONAL:
                 problems.append(f"{editable}: не указано значение")
             else:
                 changes[editable] = value
         if not changes and not problems:
-            problems.append("Изменение: укажите хотя бы одно поле, Наименование или Проект")
+            fields = (*EDITABLE, message.FIO_KEY) if allow_fio else EDITABLE
+            problems.append(f"Изменение: укажите хотя бы одно поле: {', '.join(fields)}")
     else:
         problems.extend(_extra_fields(action, values))
     if problems:
@@ -142,6 +165,10 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
         card,
         name=changes.get("Наименование", card.name),
         project=changes.get("Проект", card.project),
+        fio=changes.get(message.FIO_KEY, card.fio),
+        accounting=changes.get(schema.ACCOUNTING, card.accounting),
+        first_use=changes.get(schema.FIRST_USE, card.first_use),
+        summary=changes.get(schema.SUMMARY, card.summary),
     )
     if action == EDIT and after == card:
         refused(ctx, "Изменение: новые значения совпадают с текущими. Изменений нет")
@@ -153,7 +180,8 @@ async def run(ctx: Ctx, action: str, values: list[tuple[str, str]]) -> None:
         preview = bold("Подтвердите удаление документа:") + "\n" + card.html()
     else:
         lines = "\n".join(
-            f"{field}: {struck(escape(card.value(field)))} → {bold(escape(value))}"
+            f"{field}: {struck(escape(card.value(field) or EMPTY))} → "
+            f"{bold(escape(value or EMPTY))}"
             for field, value in changes.items()
         )
         preview = (
@@ -273,11 +301,21 @@ async def confirm(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
         ctx.audit("Удаление записи", _plain_card(current))
         ctx.reply(bold("Удалено") + "\n" + current.html())
         return
-    details = "; ".join(f"{f}: {current.value(f)} → {v}" for f, v in changes.items())
+    details = "; ".join(
+        f"{f}: {current.value(f) or EMPTY} → {v or EMPTY}" for f, v in changes.items()
+    )
     if "Наименование" in changes:
         entry.name = changes["Наименование"]
     if "Проект" in changes:
         entry.project = changes["Проект"]
+    if message.FIO_KEY in changes:
+        entry.fio = changes[message.FIO_KEY]
+    if schema.ACCOUNTING in changes:
+        entry.accounting = changes[schema.ACCOUNTING]
+    if schema.FIRST_USE in changes:
+        entry.first_use = changes[schema.FIRST_USE]
+    if schema.SUMMARY in changes:
+        entry.summary = changes[schema.SUMMARY]
     entry.version += 1
     entry.updated_at = ctx.now
     await ctx.session.flush()

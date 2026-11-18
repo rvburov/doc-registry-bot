@@ -18,7 +18,7 @@
 
 from dataclasses import dataclass, field
 
-from doc_registry_bot.registry import designation, eskd, text
+from doc_registry_bot.registry import designation, eskd, schema, text
 from doc_registry_bot.registry.names import is_full_name
 
 ACTION_KEY = "Действие"
@@ -53,6 +53,9 @@ class RegistrationRequest:
     name: str
     project: str
     fio: str
+    accounting: str = ""
+    first_use: str = ""
+    summary: str = ""
 
     @property
     def new_execution(self) -> bool:
@@ -210,13 +213,23 @@ def read_values(
     if problems or parsed is None:
         return None, problems
     org = listed(parsed[0], org_codes) or parsed[0]
-    return RegistrationRequest(org, parsed[1], parsed[2], name, project, fio), []
+    return RegistrationRequest(
+        org,
+        parsed[1],
+        parsed[2],
+        name,
+        project,
+        fio,
+        accounting=text.value(values, schema.ACCOUNTING),
+        first_use=text.value(values, schema.FIRST_USE),
+        summary=text.value(values, schema.SUMMARY),
+    ), []
 
 
 def read_batch(
     message: str | None, org_codes: list[str], sender_fio: str | None = None
 ) -> BatchRead:
-    """Номера через запятую в строке «Номер», общие наименование, проект и ФИО.
+    """Номера через запятую в строке «Номер», остальные поля общие для всего списка.
 
     Порядок, повторы и пустые элементы сохраняются: одинаковые маски означают несколько
     документов, а случайная двойная запятая — ошибку, не сокращение заявки.
@@ -261,7 +274,17 @@ def read_batch(
         request = None
         if not problems and parsed is not None:
             org = listed(parsed[0], org_codes) or parsed[0]
-            request = RegistrationRequest(org, parsed[1], parsed[2], name, project, fio)
+            request = RegistrationRequest(
+                org,
+                parsed[1],
+                parsed[2],
+                name,
+                project,
+                fio,
+                accounting=text.value(values, schema.ACCOUNTING),
+                first_use=text.value(values, schema.FIRST_USE),
+                summary=text.value(values, schema.SUMMARY),
+            )
         items.append(BatchItem(index + 1, raw, request, problems))
     return BatchRead(items, common)
 
@@ -271,6 +294,15 @@ def known_lines(message: str | None) -> int:
     values = text.lines(message)
     return sum(
         1
-        for key in (ACTION_KEY, NUMBER_KEY, NAME_KEY, PROJECT_KEY, FIO_KEY)
+        for key in (
+            ACTION_KEY,
+            NUMBER_KEY,
+            NAME_KEY,
+            PROJECT_KEY,
+            FIO_KEY,
+            schema.ACCOUNTING,
+            schema.FIRST_USE,
+            schema.SUMMARY,
+        )
         if any(text.same_name(name, key) for name, _ in values)
     )

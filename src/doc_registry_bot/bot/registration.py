@@ -12,7 +12,7 @@ from doc_registry_bot.bot import pending
 from doc_registry_bot.bot.context import Ctx
 from doc_registry_bot.db import journal
 from doc_registry_bot.registry import designation as d
-from doc_registry_bot.registry import eskd, markup, message, text, workbook
+from doc_registry_bot.registry import eskd, markup, message, schema, text, workbook
 from doc_registry_bot.registry.markup import bold, escape
 from doc_registry_bot.registry.message import BatchRead, RegistrationRequest
 
@@ -55,6 +55,19 @@ def refused_headed(ctx: Ctx, plain: str) -> None:
     ctx.reply(markup.headed(plain))
 
 
+def _optional_fields(row: PlannedRow | RegistrationRequest) -> list[tuple[str, str]]:
+    """Заполненные необязательные поля для карточки и журнала действий."""
+    return [
+        (field, value)
+        for field, value in (
+            (schema.ACCOUNTING, row.accounting),
+            (schema.FIRST_USE, row.first_use),
+            (schema.SUMMARY, row.summary),
+        )
+        if value
+    ]
+
+
 def registered_card(designation: str, request: RegistrationRequest, heading: str) -> str:
     return "\n".join(
         [
@@ -63,6 +76,7 @@ def registered_card(designation: str, request: RegistrationRequest, heading: str
             f"{message.NAME_KEY}: {escape(request.name)}",
             f"{message.PROJECT_KEY}: {escape(request.project)}",
             f"{message.FIO_KEY}: {escape(request.fio)}",
+            *(f"{field}: {escape(value)}" for field, value in _optional_fields(request)),
         ]
     )
 
@@ -110,6 +124,7 @@ def _batch_card(rows: list[PlannedRow], heading: str) -> str:
         + "\n".join(f"{row.line}. {bold(escape(row.designation))}" for row in rows)
         + f"\nНаименование: {escape(first.name)}\nПроект: {escape(first.project)}"
         + f"\nФИО: {escape(first.fio)}"
+        + "".join(f"\n{field}: {escape(value)}" for field, value in _optional_fields(first))
     )
 
 
@@ -196,6 +211,8 @@ async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str =
             details += f"; файл: {file_name}; строка: {row.line}"
         elif source == "список":
             details += f"; позиция: {row.line}"
+        for field, value in _optional_fields(row):
+            details += f"; {field}: {value}"
         ctx.audit("Регистрация записи", details)
 
 
@@ -227,7 +244,16 @@ async def register(ctx: Ctx, request: RegistrationRequest) -> None:
     if planned is None:
         refused(ctx, problem)
         return
-    row = PlannedRow(0, planned, request.name, request.project, request.fio)
+    row = PlannedRow(
+        0,
+        planned,
+        request.name,
+        request.project,
+        request.fio,
+        request.accounting,
+        request.first_use,
+        request.summary,
+    )
     if not series.values:
         # Пустая серия — любой первый документ или исполнение: просим подтверждения.
         await pending.put(ctx, "register", _payload(ctx, [row], [series], request=asdict(request)))
@@ -279,7 +305,18 @@ async def register_batch(ctx: Ctx, batch: BatchRead) -> None:
             continue
         # Повтор маски намеренный: следующий номер видит уже подобранное обозначение.
         values.append(journal.designation_key(planned))
-        rows.append(PlannedRow(item.position, planned, request.name, request.project, request.fio))
+        rows.append(
+            PlannedRow(
+                item.position,
+                planned,
+                request.name,
+                request.project,
+                request.fio,
+                request.accounting,
+                request.first_use,
+                request.summary,
+            )
+        )
         statuses.append(prefix + _status(by_series[(request.org, request.eskd)]))
     if has_errors:
         _refuse_batch(

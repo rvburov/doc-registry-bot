@@ -185,7 +185,15 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
         refused(ctx, f"Действие: неизвестное действие (Можно: {documents.CHOICES})")
         return
     if known is not None:
-        await documents.run(ctx, known, values)
+        # ФИО в запросе относится к записи. Исполнитель для истории — из своей карточки.
+        if (
+            known == documents.EDIT
+            and role.is_admin
+            and any(text.same_name(field, message.FIO_KEY) for field, _ in values)
+            and await _sender_fio(ctx) is None
+        ):
+            return
+        await documents.run(ctx, known, values, allow_fio=role.is_admin)
         return
     await _register_text(ctx, incoming.text, role)
 
@@ -235,6 +243,12 @@ async def _answer_pending(
             return True
         await registration.confirm(ctx, kind, payload)
     elif kind in ("delete", "edit", "delete_many"):
+        if kind == "edit" and message.FIO_KEY in payload.get("changes", {}) and not role.is_admin:
+            refused(
+                ctx,
+                "Нет прав: менять ФИО записи может только администратор. Отправьте запрос заново",
+            )
+            return True
         await documents.confirm(ctx, kind, payload)
     return True
 
