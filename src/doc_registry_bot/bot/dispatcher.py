@@ -179,7 +179,7 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
         await commands.run(ctx, command, role, incoming.file_ids, incoming.message_id)
         return
     if incoming.file_ids:
-        await _register_file(ctx, incoming)
+        await _register_file(ctx, incoming, role)
         return
     if action and not text.same_name(action, message.REGISTER_WORD) and known is None:
         refused(ctx, f"Действие: неизвестное действие (Можно: {documents.CHOICES})")
@@ -187,7 +187,7 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
     if known is not None:
         await documents.run(ctx, known, values)
         return
-    await _register_text(ctx, incoming.text)
+    await _register_text(ctx, incoming.text, role)
 
 
 async def _answer_pending(
@@ -226,6 +226,13 @@ async def _answer_pending(
         ctx.reply(markup.bold("Операция отменена"))
         return True
     if kind in ("register", "batch", "file"):
+        if payload.get("requires_admin") and not role.is_admin:
+            refused(
+                ctx,
+                "Нет прав: регистрация за другого человека доступна только администратору. "
+                "Отправьте запрос заново",
+            )
+            return True
         await registration.confirm(ctx, kind, payload)
     elif kind in ("delete", "edit", "delete_many"):
         await documents.confirm(ctx, kind, payload)
@@ -252,30 +259,33 @@ async def _sender_fio(ctx: Ctx) -> str | None:
     return fio
 
 
-async def _register_text(ctx: Ctx, body: str) -> None:
+async def _register_text(ctx: Ctx, body: str, role: Role) -> None:
     values = text.lines(body)
+    # ФИО записи может отличаться от отправителя только у администратора. Сам отправитель
+    # остается в ctx: его карточка и ID нужны для журнала действий и registrant_id.
+    provided_fio = text.value(values, message.FIO_KEY) if role.is_admin else ""
     if "," in text.value(values, message.NUMBER_KEY):
         fio = await _sender_fio(ctx)
         if fio is None:
             return
-        batch = message.read_batch(body, ctx.orgs, fio)
+        batch = message.read_batch(body, ctx.orgs, provided_fio or fio)
         await registration.register_batch(ctx, batch)
         return
-    request, problems = message.read(body, ctx.orgs, sender_fio=_ANY_FULL_NAME)
+    request, problems = message.read(body, ctx.orgs, sender_fio=provided_fio or _ANY_FULL_NAME)
     if request is None:
         refused(ctx, "\n".join(problems))
         return
     fio = await _sender_fio(ctx)
     if fio is None:
         return
-    request, problems = message.read(body, ctx.orgs, fio)
+    request, problems = message.read(body, ctx.orgs, provided_fio or fio)
     if request is None:
         refused(ctx, "\n".join(problems))
         return
     await registration.register(ctx, request)
 
 
-async def _register_file(ctx: Ctx, incoming: Incoming) -> None:
+async def _register_file(ctx: Ctx, incoming: Incoming, role: Role) -> None:
     if len(incoming.file_ids) > 1:
         refused(ctx, "Файл: отправьте одну книгу в сообщении")
         return
@@ -287,4 +297,9 @@ async def _register_file(ctx: Ctx, incoming: Incoming) -> None:
     except MessengerError:
         refused_headed(ctx, "Файл не получен. Отправьте книгу заново")
         return
-    await registration.register_file(ctx, attachment.data, attachment.name or "Вложение.xlsx")
+    await registration.register_file(
+        ctx,
+        attachment.data,
+        attachment.name or "Вложение.xlsx",
+        allow_other_fio=role.is_admin,
+    )

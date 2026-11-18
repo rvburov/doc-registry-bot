@@ -114,14 +114,24 @@ def _batch_card(rows: list[PlannedRow], heading: str) -> str:
 
 
 def _file_card(file_name: str, rows: list[PlannedRow], heading: str) -> str:
+    different_fio = len({row.fio for row in rows}) > 1
+    fio = (
+        "ФИО регистрирующих указаны по строкам"
+        if different_fio
+        else ("ФИО регистрирующего: " + escape(rows[0].fio))
+    )
     return (
         bold(escape(heading))
         + "\nФайл: "
         + escape(file_name)
-        + "\nФИО регистрирующего: "
-        + escape(rows[0].fio)
         + "\n"
-        + "\n".join(f"Строка {row.line}: {bold(escape(row.designation))}" for row in rows)
+        + fio
+        + "\n"
+        + "\n".join(
+            f"Строка {row.line}: {bold(escape(row.designation))}"
+            + (f", ФИО: {escape(row.fio)}" if different_fio else "")
+            for row in rows
+        )
     )
 
 
@@ -179,7 +189,8 @@ async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str =
     # Событие и сама регистрация сохраняются в одной транзакции, по одному на документ.
     for row in rows:
         details = (
-            f"{row.designation}; наименование: {row.name}; проект: {row.project}; способ: {source}"
+            f"{row.designation}; наименование: {row.name}; проект: {row.project}; "
+            f"ФИО в журнале: {row.fio}; способ: {source}"
         )
         if file_name:
             details += f"; файл: {file_name}; строка: {row.line}"
@@ -188,10 +199,13 @@ async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str =
         ctx.audit("Регистрация записи", details)
 
 
-def _payload(kind_rows: list[PlannedRow], series: list[Series], **extra: Any) -> dict[str, Any]:
+def _payload(
+    ctx: Ctx, kind_rows: list[PlannedRow], series: list[Series], **extra: Any
+) -> dict[str, Any]:
     return {
         "rows": [asdict(row) for row in kind_rows],
         "series": [asdict(item) for item in series],
+        "requires_admin": any(row.fio != ctx.sender_fio for row in kind_rows),
         **extra,
     }
 
@@ -216,7 +230,7 @@ async def register(ctx: Ctx, request: RegistrationRequest) -> None:
     row = PlannedRow(0, planned, request.name, request.project, request.fio)
     if not series.values:
         # Пустая серия — любой первый документ или исполнение: просим подтверждения.
-        await pending.put(ctx, "register", _payload([row], [series], request=asdict(request)))
+        await pending.put(ctx, "register", _payload(ctx, [row], [series], request=asdict(request)))
         if eskd.find(request.eskd) is None:
             warning = bold(_UNKNOWN_CODE)
         else:
@@ -279,7 +293,7 @@ async def register_batch(ctx: Ctx, batch: BatchRead) -> None:
         await _write(ctx, rows, "список")
         ctx.reply(_batch_card(rows, f"Зарегистрировано: {len(rows)} из {len(rows)}."))
         return
-    await pending.put(ctx, "batch", _payload(rows, snapshots))
+    await pending.put(ctx, "batch", _payload(ctx, rows, snapshots))
     warnings = "\n\n".join(first_series_warning(s) for s in new_series)
     ctx.reply(
         _batch_card(rows, f"Заявка на регистрацию: {len(rows)}")
@@ -293,10 +307,14 @@ async def register_batch(ctx: Ctx, batch: BatchRead) -> None:
 # ── Книга Excel ───────────────────────────────────────────────────────────────
 
 
-async def register_file(ctx: Ctx, data: bytes, file_name: str) -> None:
+async def register_file(
+    ctx: Ctx, data: bytes, file_name: str, *, allow_other_fio: bool = False
+) -> None:
     try:
         name = workbook.safe_name(file_name)
-        source = workbook.read_message_book(data, name, ctx.sender_fio)
+        source = workbook.read_message_book(
+            data, name, ctx.sender_fio, allow_other_fio=allow_other_fio
+        )
     except workbook.WorkbookError as error:
         _refuse_file(ctx, 0, [str(error)])
         return
@@ -351,7 +369,7 @@ async def register_file(ctx: Ctx, data: bytes, file_name: str) -> None:
         await _write(ctx, rows, "файл", name)
         ctx.reply(_file_card(name, rows, f"Зарегистрировано: {len(rows)} из {len(rows)}."))
         return
-    await pending.put(ctx, "file", _payload(rows, snapshots, file_name=name))
+    await pending.put(ctx, "file", _payload(ctx, rows, snapshots, file_name=name))
     warnings = "\n\n".join(first_series_warning(s) for s in snapshots if not s.values)
     ctx.reply(
         _file_card(name, rows, f"Заявка на регистрацию: {len(rows)}")

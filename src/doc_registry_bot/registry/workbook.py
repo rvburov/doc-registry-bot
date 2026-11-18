@@ -2,7 +2,8 @@
 
 Два случая:
 - книга вложением в сообщении бота: ограничения по размеру, строкам и ячейкам, ФИО берется у
-  отправителя, столбец ФИО необязателен и не читается, «Дата регистрации» не читается;
+  отправителя; с разрешения вызывающего кода можно читать ФИО каждой строки. Столбец ФИО
+  необязателен, пустая ячейка заменяется ФИО отправителя; «Дата регистрации» не читается;
 - журнал целиком для замены на сервере (команда import, CSV или Excel): читаются все восемь
   столбцов.
 
@@ -62,7 +63,9 @@ def safe_name(name: str | None) -> str:
     return value
 
 
-def read_message_book(data: bytes, file_name: str, sender_fio: str) -> list[BookRow]:
+def read_message_book(
+    data: bytes, file_name: str, sender_fio: str, *, allow_other_fio: bool = False
+) -> list[BookRow]:
     """Книга из сообщения бота: проверка размера и устройства, затем строки первого листа."""
     name = safe_name(file_name)
     extension = os.path.splitext(name)[1].lower()
@@ -73,7 +76,9 @@ def read_message_book(data: bytes, file_name: str, sender_fio: str) -> list[Book
     if len(data) > MAX_FILE_BYTES:
         raise WorkbookError(f"Файл больше допустимых {MAX_FILE_BYTES // 1024 // 1024} МБ.")
     check_archive(data)
-    return read_rows(data, max_rows=MAX_ROWS, sender_fio=sender_fio)
+    return read_rows(
+        data, max_rows=MAX_ROWS, sender_fio=sender_fio, allow_other_fio=allow_other_fio
+    )
 
 
 def check_archive(data: bytes) -> None:
@@ -134,8 +139,15 @@ def _count_cells(content: bytes) -> int:
     return cells
 
 
-def read_rows(data: bytes, *, max_rows: int | None, sender_fio: str | None) -> list[BookRow]:
-    """Строки первого листа. `sender_fio` задан — ФИО из книги не читается и не требуется."""
+def read_rows(
+    data: bytes,
+    *,
+    max_rows: int | None,
+    sender_fio: str | None,
+    allow_other_fio: bool = False,
+) -> list[BookRow]:
+    """Строки первого листа. При заданном `sender_fio` столбец ФИО необязателен;
+    без `allow_other_fio` его значения не читаются."""
     try:
         book = load_workbook(io.BytesIO(data), data_only=True)
     except Exception as error:
@@ -157,7 +169,13 @@ def read_rows(data: bytes, *, max_rows: int | None, sender_fio: str | None) -> l
                 by_row.setdefault(row_number, {})[column] = value
     finally:
         book.close()
-    return _book_rows(by_row, f"На листе «{title}»", max_rows=max_rows, sender_fio=sender_fio)
+    return _book_rows(
+        by_row,
+        f"На листе «{title}»",
+        max_rows=max_rows,
+        sender_fio=sender_fio,
+        allow_other_fio=allow_other_fio,
+    )
 
 
 def decode_text(data: bytes) -> str:
@@ -208,7 +226,12 @@ def read_table(data: bytes, name: str, *, sender_fio: str | None = None) -> list
 
 
 def _book_rows(
-    by_row: dict[int, dict[int, str]], where: str, *, max_rows: int | None, sender_fio: str | None
+    by_row: dict[int, dict[int, str]],
+    where: str,
+    *,
+    max_rows: int | None,
+    sender_fio: str | None,
+    allow_other_fio: bool = False,
 ) -> list[BookRow]:
     if not by_row:
         raise WorkbookError(f"{where} нет данных.")
@@ -216,7 +239,7 @@ def _book_rows(
     header_row = by_row[numbers[0]]
     width = max(header_row)
     header = [header_row.get(column, "") for column in range(1, width + 1)]
-    at = _header(header, where, from_sender=sender_fio is not None)
+    at = _header(header, where, from_sender=sender_fio is not None, allow_other_fio=allow_other_fio)
 
     result: list[BookRow] = []
     for number in numbers[1:]:
@@ -229,12 +252,15 @@ def _book_rows(
         def cell(index: int, row: dict[int, str] = values) -> str:
             return row.get(index + 1, "") if index >= 0 else ""
 
+        fio = cell(at[2])
+        if sender_fio is not None and (not allow_other_fio or not fio):
+            fio = sender_fio
         result.append(
             BookRow(
                 line=number,
                 name=cell(at[0]),
                 designation=cell(at[1]),
-                fio=sender_fio if sender_fio is not None else cell(at[2]),
+                fio=fio,
                 date=cell(at[3]),
                 project=cell(at[4]),
                 accounting=cell(at[5]),
@@ -247,13 +273,17 @@ def _book_rows(
     return result
 
 
-def _header(header: list[str], where: str, *, from_sender: bool) -> list[int]:
+def _header(
+    header: list[str], where: str, *, from_sender: bool, allow_other_fio: bool = False
+) -> list[int]:
     """Номера столбцов журнала в шапке (с нуля) в порядке журнала."""
     cells = [(name, index) for index, name in enumerate(header)]
     if from_sender:
-        # ФИО заполняет карточка отправителя: старый столбец, если остался, не читается.
-        cells = [cell for cell in cells if not same_name(cell[0], schema.FIO)]
-        cells.append((schema.FIO, -1))
+        if not allow_other_fio:
+            # ФИО заполняет карточка отправителя: старый столбец, если остался, не читается.
+            cells = [cell for cell in cells if not same_name(cell[0], schema.FIO)]
+        if not any(same_name(cell[0], schema.FIO) for cell in cells):
+            cells.append((schema.FIO, -1))
     found, problem = schema.find(cells, lambda cell: cell[0])
     if found is None:
         raise WorkbookError(f"{where} {problem}.")

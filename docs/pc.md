@@ -186,7 +186,7 @@ git clone https://github.com/rvburov/doc-registry-bot.git
 
 Все команды — в терминале Ubuntu/WSL в VS Code. В примерах проект находится в
 `E:\doc-registry-bot`; если у вас другая папка, замените ее путь в командах и в Проводнике.
-В примерах версия `1.2.2`; для другой версии используйте число из имени установочного файла.
+В примерах версия `1.2.3`; для другой версии используйте число из имени установочного файла.
 При ошибке команды остановитесь и разберите ее по шагу 18.
 
 ### Вариант 1. Собрать на своем ПК
@@ -222,10 +222,10 @@ git clone https://github.com/rvburov/doc-registry-bot.git
    сохранит их вместе с PostgreSQL в один архив. В итогах тестов не должно быть `failed` или
    `skipped`: при пропусках проверьте тестовую базу и повторите сборку.
 
-4. Дождитесь строки `Собрано: dist/doc-registry-bot-1.2.2.tar.gz`. Проверьте файл:
+4. Дождитесь строки `Собрано: dist/doc-registry-bot-1.2.3.tar.gz`. Проверьте файл:
 
    ```bash
-   ls -lh dist/doc-registry-bot-1.2.2.tar.gz
+   ls -lh dist/doc-registry-bot-1.2.3.tar.gz
    ```
 
    Это готовый файл для установки. Скачивать Artifacts при этом способе не требуется.
@@ -253,7 +253,7 @@ git clone https://github.com/rvburov/doc-registry-bot.git
 5. Проверьте файл в терминале:
 
    ```bash
-   ls -lh /mnt/e/doc-registry-bot/dist/doc-registry-bot-1.2.2.tar.gz
+   ls -lh /mnt/e/doc-registry-bot/dist/doc-registry-bot-1.2.3.tar.gz
    ```
 
    При этом способе `scripts/build.sh` запускать не нужно. Artifacts хранятся на GitHub
@@ -339,7 +339,7 @@ openssl rand -hex 24
 
 | Строка | Что вписать | Откуда взять |
 |---|---|---|
-| `BOT_VERSION` | версию, например `1.2.2` | имя файла `dist/doc-registry-bot-1.2.2.tar.gz` из шага 5 |
+| `BOT_VERSION` | версию, например `1.2.3` | имя файла `dist/doc-registry-bot-1.2.3.tar.gz` из шага 5 |
 | `MESSENGER_URL` | `http://messenger-api:8888` | имя из шага 6; если порт в шаге 6 не `8888` — свой порт |
 | `MESSENGER_NETWORK` | `messenger` | не менять |
 | `OWNER_IDS` | ваш userId | знаете — впишите; не знаете — ниже, `./contacts.sh` |
@@ -368,7 +368,7 @@ docker compose up -d
 
 ```bash
 cd /mnt/e/doc-registry-bot/deploy
-docker load -i ../dist/doc-registry-bot-1.2.2.tar.gz
+docker load -i ../dist/doc-registry-bot-1.2.3.tar.gz
 ./contacts.sh | grep Фамилия
 ```
 
@@ -423,11 +423,11 @@ doc-registry-bot`. Делается один раз; `update.sh` в шаге 10 
 
 ```bash
 cd /mnt/e/doc-registry-bot/deploy
-./update.sh ../dist/doc-registry-bot-1.2.2.tar.gz
+./update.sh ../dist/doc-registry-bot-1.2.3.tar.gz
 ```
 
-Строка «Бот работает, версия 1.2.2.» — бот запущен. В мессенджер вам придет «Бот регистрации КД
-запущен, версия 1.2.2.».
+Строка «Бот работает, версия 1.2.3.» — бот запущен. В мессенджер вам придет «Бот регистрации КД
+запущен, версия 1.2.3.».
 
 ## 11. Проверка в мессенджере
 
@@ -637,7 +637,7 @@ docker volume rm doc-registry-bot_db-data
 
 Бот уже установлен, в `deploy` есть ваш `.env`. Выберите один способ ниже: со сборкой на ПК
 или со скачиванием готовой сборки. Команды выполняйте по порядку в Ubuntu/WSL; при ошибке
-остановитесь. В примерах проект `E:\doc-registry-bot` и версия `1.2.2`: подставьте свою папку
+остановитесь. В примерах проект `E:\doc-registry-bot` и версия `1.2.3`: подставьте свою папку
 и номер версии из имени архива.
 
 ### Вариант 1. Собрать на ПК и установить
@@ -667,17 +667,17 @@ docker volume rm doc-registry-bot_db-data
    ```
 
    В итогах тестов не должно быть `failed` или `skipped`. Дождитесь строки
-   `Собрано: dist/doc-registry-bot-1.2.2.tar.gz`. Artifacts скачивать не нужно.
+   `Собрано: dist/doc-registry-bot-1.2.3.tar.gz`. Artifacts скачивать не нужно.
 
 4. Установите собранную версию:
 
    ```bash
    cd /mnt/e/doc-registry-bot/deploy
-   ./update.sh ../dist/doc-registry-bot-1.2.2.tar.gz
+   ./update.sh ../dist/doc-registry-bot-1.2.3.tar.gz
    ```
 
    Скрипт загрузит образы, проверит настройки, сделает защитную копию базы, перезапустит бота и
-   проверит его версию. Дождитесь строки `Бот работает, версия 1.2.2.`.
+   проверит его версию. Дождитесь строки `Бот работает, версия 1.2.3.`.
 
 5. Напишите боту «Журнал действий». В CSV должна быть запись «Выгрузка журнала действий».
    Новые регистрации тоже будут попадать в этот журнал, по одной записи на документ.
@@ -694,26 +694,26 @@ docker volume rm doc-registry-bot_db-data
 
 2. Откройте https://github.com/rvburov/doc-registry-bot/actions и войдите в GitHub. Выберите
    последний запуск «Проверки» ветки `master` и дождитесь зеленой галочки. Внизу страницы
-   нажмите **Artifacts → doc-registry-bot-1.2.2** (или номер вашей версии). Версия должна
+   нажмите **Artifacts → doc-registry-bot-1.2.3** (или номер вашей версии). Версия должна
    совпадать с `version` в полученном `pyproject.toml`.
 3. Распакуйте скачанный ZIP в Проводнике в `E:\doc-registry-bot\dist`. Проверьте, что получился
-   файл `E:\doc-registry-bot\dist\doc-registry-bot-1.2.2.tar.gz`, без дополнительной вложенной
+   файл `E:\doc-registry-bot\dist\doc-registry-bot-1.2.3.tar.gz`, без дополнительной вложенной
    папки. Сам `.tar.gz` не распаковывайте; `scripts/build.sh` здесь не требуется.
 4. Проверьте файл в Ubuntu/WSL:
 
    ```bash
-   ls -lh /mnt/e/doc-registry-bot/dist/doc-registry-bot-1.2.2.tar.gz
+   ls -lh /mnt/e/doc-registry-bot/dist/doc-registry-bot-1.2.3.tar.gz
    ```
 
 5. Установите скачанную сборку:
 
    ```bash
    cd /mnt/e/doc-registry-bot/deploy
-   ./update.sh ../dist/doc-registry-bot-1.2.2.tar.gz
+   ./update.sh ../dist/doc-registry-bot-1.2.3.tar.gz
    ```
 
    Скрипт загрузит образы, проверит настройки, сделает защитную копию базы, перезапустит бота и
-   проверит его версию. Дождитесь строки `Бот работает, версия 1.2.2.`.
+   проверит его версию. Дождитесь строки `Бот работает, версия 1.2.3.`.
 
 6. Напишите боту «Журнал действий». В CSV должна быть запись «Выгрузка журнала действий».
    Новые регистрации тоже будут попадать в этот журнал, по одной записи на документ.
