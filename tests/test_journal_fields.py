@@ -15,7 +15,7 @@ from doc_registry_bot import importer
 from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.bot.types import Attachment, MessengerError
 from doc_registry_bot.db import journal
-from doc_registry_bot.db.models import Member
+from doc_registry_bot.db.models import Member, Pending
 from doc_registry_bot.registry import markup, schema
 from tests import books
 from tests.stand import ADMIN, OWNER, REGISTRAR, Stand
@@ -325,6 +325,25 @@ async def test_export_import_keeps_ten_columns_values_and_fingerprint(stand: Sta
             importer.fingerprint(await importer.export_csv(session, stand.dispatcher._config.zone))
             != old_fingerprint
         )
+
+
+async def test_a_pending_note_edit_from_the_previous_version_can_be_confirmed(stand: Stand) -> None:
+    assert "Подтвердите изменение" in await stand.say(REGISTRAR, edit(schema.SUMMARY, "Сталь"))
+    async with stand.db() as session, session.begin():
+        pending = await session.get(Pending, REGISTRAR)
+        assert pending is not None
+        payload = dict(pending.payload)
+        card = dict(payload["card"])
+        card.pop("division")
+        card.pop("status")
+        payload["card"] = card
+        payload["changes"] = {schema.LEGACY_COLUMNS[-1]: "Сталь", "Проект": "Новый проект"}
+        pending.payload = payload
+    assert "Изменено" in await stand.say(REGISTRAR, "Да")
+    [entry] = await stand.entries()
+    assert entry.summary == "Сталь" and entry.status == schema.REGISTERED
+    [event] = await stand.audit()
+    assert f"{schema.SUMMARY}: не указано → Сталь" in event.details
 
 
 @pytest.mark.parametrize("status", [schema.REGISTERED, schema.CANCELED, "", "Ошибка"])

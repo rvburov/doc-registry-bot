@@ -311,7 +311,9 @@ async def confirm(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
         await _confirm_delete_many(ctx, payload)
         return
     before = Card(**payload["card"])
-    changes: dict[str, str] = payload["changes"]
+    changes: dict[str, str] = {
+        schema.field_name(key): value for key, value in payload["changes"].items()
+    }
     entry = await ctx.session.get(JournalEntry, before.entry_id, with_for_update=True)
     if entry is None:
         refused(ctx, f"Номер: документ {before.number} не найден")
