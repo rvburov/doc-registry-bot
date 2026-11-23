@@ -4,7 +4,7 @@
 - книга вложением в сообщении бота: ограничения по размеру, строкам и ячейкам, ФИО берется у
   отправителя; с разрешения вызывающего кода можно читать ФИО каждой строки. Столбец ФИО
   необязателен, пустая ячейка заменяется ФИО отправителя; «Дата регистрации» не читается;
-- журнал целиком для замены на сервере (команда import, CSV или Excel): читаются все восемь
+- журнал целиком для замены на сервере (команда import, CSV или Excel): читаются все десять
   столбцов.
 
 Лист — ПЕРВЫЙ, а не по имени: файл делают выгрузкой или вручную, и имя листа у каждого свое.
@@ -51,6 +51,8 @@ class BookRow:
     accounting: str
     first_use: str
     summary: str
+    division: str = ""
+    status: str = schema.REGISTERED
 
 
 def safe_name(name: str | None) -> str:
@@ -252,20 +254,27 @@ def _book_rows(
         def cell(index: int, row: dict[int, str] = values) -> str:
             return row.get(index + 1, "") if index >= 0 else ""
 
-        fio = cell(at[2])
+        def field(name: str) -> str:
+            return cell(at[schema.COLUMNS.index(name)])
+
+        fio = field(schema.FIO)
         if sender_fio is not None and (not allow_other_fio or not fio):
             fio = sender_fio
         result.append(
             BookRow(
                 line=number,
-                name=cell(at[0]),
-                designation=cell(at[1]),
+                name=field(schema.TITLE),
+                designation=field(schema.DESIGNATION),
                 fio=fio,
-                date=cell(at[3]),
-                project=cell(at[4]),
-                accounting=cell(at[5]),
-                first_use=cell(at[6]),
-                summary=cell(at[7]),
+                date=field(schema.DATE),
+                project=field(schema.PROJECT),
+                accounting=field(schema.ACCOUNTING),
+                first_use=field(schema.FIRST_USE),
+                summary=field(schema.SUMMARY),
+                division=field(schema.DIVISION),
+                status=field(schema.STATUS)
+                if at[schema.COLUMNS.index(schema.STATUS)] >= 0
+                else schema.REGISTERED,
             )
         )
     if not result:
@@ -284,6 +293,9 @@ def _header(
             cells = [cell for cell in cells if not same_name(cell[0], schema.FIO)]
         if not any(same_name(cell[0], schema.FIO) for cell in cells):
             cells.append((schema.FIO, -1))
+    for extra in (schema.DIVISION, schema.STATUS):
+        if not any(same_name(cell[0], extra) for cell in cells):
+            cells.append((extra, -1))
     found, problem = schema.find(cells, lambda cell: cell[0])
     if found is None:
         raise WorkbookError(f"{where} {problem}.")

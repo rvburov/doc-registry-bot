@@ -61,7 +61,7 @@ def _local(moment: datetime, zone: ZoneInfo) -> str:
 
 
 async def export_csv(session: AsyncSession, zone: ZoneInfo) -> bytes:
-    """Весь журнал КД: восемь столбцов, по порядку записи. Одни и те же данные — одни и те же
+    """Весь журнал КД: десять столбцов, по порядку записи. Одни и те же данные — одни и те же
     байты: на этом держится отпечаток резерва."""
     entries = await journal.all_entries(session)
     return csv_bytes(
@@ -70,9 +70,11 @@ async def export_csv(session: AsyncSession, zone: ZoneInfo) -> bytes:
             [
                 e.name,
                 e.designation,
-                e.fio,
-                _local(e.registered_at, zone),
                 e.project,
+                _local(e.registered_at, zone),
+                e.fio,
+                e.division,
+                e.status,
                 e.accounting,
                 e.first_use,
                 e.summary,
@@ -135,6 +137,10 @@ def _entries(
                 report.problems.append(f"{where}: не разобрана дата «{row.date}»")
                 continue
             moment = now
+        status = schema.status(row.status)
+        if status is None:
+            report.problems.append(f"{where}: недопустимая актуальность «{row.status}»")
+            continue
         entries.append(
             JournalEntry(
                 designation=row.designation.strip(),
@@ -142,6 +148,8 @@ def _entries(
                 series=journal.series_of(row.designation),
                 name=row.name,
                 fio=row.fio,
+                division=row.division,
+                status=status,
                 registered_at=moment,
                 project=row.project,
                 accounting=row.accounting,

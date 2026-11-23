@@ -6,7 +6,7 @@
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -189,7 +189,9 @@ async def route(ctx: Ctx, incoming: Incoming) -> None:
         if (
             known == documents.EDIT
             and role.is_admin
-            and any(text.same_name(field, message.FIO_KEY) for field, _ in values)
+            and any(
+                text.same_name(field, key) for field, _ in values for key in documents.ADMIN_FIELDS
+            )
             and await _sender_fio(ctx) is None
         ):
             return
@@ -243,10 +245,15 @@ async def _answer_pending(
             return True
         await registration.confirm(ctx, kind, payload)
     elif kind in ("delete", "edit", "delete_many"):
-        if kind == "edit" and message.FIO_KEY in payload.get("changes", {}) and not role.is_admin:
+        if (
+            kind == "edit"
+            and any(key in payload.get("changes", {}) for key in documents.ADMIN_FIELDS)
+            and not role.is_admin
+        ):
             refused(
                 ctx,
-                "Нет прав: менять ФИО записи может только администратор. Отправьте запрос заново",
+                "Нет прав: менять ФИО, подразделение и актуальность может только администратор. "
+                "Отправьте запрос заново",
             )
             return True
         await documents.confirm(ctx, kind, payload)
@@ -270,6 +277,7 @@ async def _sender_fio(ctx: Ctx) -> str | None:
         return None
     await remember(ctx, person_of(card))
     ctx.sender_fio = fio
+    ctx.sender_division = text.collapse(card.division)
     return fio
 
 
@@ -283,6 +291,18 @@ async def _register_text(ctx: Ctx, body: str, role: Role) -> None:
         if fio is None:
             return
         batch = message.read_batch(body, ctx.orgs, provided_fio or fio)
+        division = await registration.division_of(ctx, provided_fio or fio, values, role.is_admin)
+        if division is None:
+            return
+        batch = replace(
+            batch,
+            items=[
+                replace(
+                    item, request=replace(item.request, division=division) if item.request else None
+                )
+                for item in batch.items
+            ],
+        )
         await registration.register_batch(ctx, batch)
         return
     request, problems = message.read(body, ctx.orgs, sender_fio=provided_fio or _ANY_FULL_NAME)
@@ -296,7 +316,10 @@ async def _register_text(ctx: Ctx, body: str, role: Role) -> None:
     if request is None:
         refused(ctx, "\n".join(problems))
         return
-    await registration.register(ctx, request)
+    division = await registration.division_of(ctx, request.fio, values, role.is_admin)
+    if division is None:
+        return
+    await registration.register(ctx, replace(request, division=division))
 
 
 async def _register_file(ctx: Ctx, incoming: Incoming, role: Role) -> None:

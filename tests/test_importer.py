@@ -20,7 +20,7 @@ HEADER = ";".join(schema.COLUMNS)
 
 
 def csv_file(*lines: str, encoding: str = "utf-8-sig") -> bytes:
-    return "\r\n".join([HEADER, *lines]).encode(encoding)
+    return "\r\n".join([";".join(schema.LEGACY_COLUMNS), *lines]).encode(encoding)
 
 
 async def backup(stand: Stand, config: BotConfig) -> str:
@@ -157,7 +157,7 @@ async def test_an_excel_export_with_extra_columns_is_loaded(
                 if value:
                     sheet.cell(row=line, column=column, value=value)  # type: ignore[attr-defined]
 
-    data = books.create_sheet(fill, [*books.schema.COLUMNS, "Письмо"])
+    data = books.create_sheet(fill, [*books.schema.LEGACY_COLUMNS, "Письмо"])
     report = await replace(stand, config, data, "журнал.xlsx", await backup(stand, config))
     assert report.ok, report.problems
     assert report.rows == 2
@@ -183,7 +183,7 @@ async def test_errors_in_the_file_stop_the_whole_replacement(
 
 
 async def test_a_csv_from_a_russian_spreadsheet_is_read(stand: Stand, config: BotConfig) -> None:
-    lines = [",".join(schema.COLUMNS), '"Вал, полый",АБВГ.301121.001,,,Машина,,,']
+    lines = [",".join(schema.LEGACY_COLUMNS), '"Вал, полый",АБВГ.301121.001,,,Машина,,,']
     data = "\r\n".join(lines).encode("cp1251")
     entries, report = importer.read_journal(data, "журнал.CSV", config.zone, NOW)
     assert report.ok, report.problems

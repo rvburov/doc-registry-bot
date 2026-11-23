@@ -21,7 +21,7 @@ from doc_registry_bot.bot import commands
 from doc_registry_bot.bot.context import BotConfig
 from doc_registry_bot.bot.types import Attachment
 from doc_registry_bot.db.models import AuditEntry, BackupJob, JournalUpload, Member
-from doc_registry_bot.registry import instructions, markup, schedule
+from doc_registry_bot.registry import instructions, markup, schedule, schema
 from doc_registry_bot.registry.folders import SHARE, TERMINAL, Choice, Folder
 from tests.fake_backup import FakeContainer
 from tests.stand import ADMIN, OWNER, REGISTRAR, Stand
@@ -34,7 +34,7 @@ FOLDERS = (
     Folder("2", "Архив", "/srv/архив"),
     Folder(SHARE, "Сетевая папка", "//fileserver/копии"),
 )
-HEADER = ";".join(importer.schema.COLUMNS)
+HEADER = ";".join(importer.schema.LEGACY_COLUMNS)
 
 
 @pytest.fixture
@@ -122,6 +122,9 @@ async def test_the_backup_shows_the_default_folder_and_writes_both_files(
     assert f"CSV журнала: создан, {job.csv_name}" in answer
     folder = container.folder("1", "")
     assert (folder / job.dump_name).exists() and (folder / job.csv_name).exists()
+    csv_data = (folder / job.csv_name).read_bytes()
+    assert csv_data.decode("utf-8-sig").splitlines()[0] == ";".join(schema.COLUMNS)
+    assert job.fingerprint == importer.fingerprint(csv_data)
     assert job.reported_at is not None
     async with stand.db() as session:
         actions = list(await session.scalars(select(AuditEntry.action)))

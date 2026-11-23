@@ -56,6 +56,7 @@ class RegistrationRequest:
     accounting: str = ""
     first_use: str = ""
     summary: str = ""
+    division: str = ""
 
     @property
     def new_execution(self) -> bool:
@@ -188,6 +189,7 @@ def read_values(
     values: list[tuple[str, str]], org_codes: list[str], sender_fio: str | None = None
 ) -> tuple[RegistrationRequest | None, list[str]]:
     """То же по готовым парам «ключ, значение»: так читаются и строки книги Excel."""
+    values = [(schema.field_name(k), v) for k, v in values]
     problems = _common_problems(values, sender_fio)
 
     number_text = text.value(values, NUMBER_KEY)
@@ -234,7 +236,7 @@ def read_batch(
     Порядок, повторы и пустые элементы сохраняются: одинаковые маски означают несколько
     документов, а случайная двойная запятая — ошибку, не сокращение заявки.
     """
-    values = text.lines(message)
+    values = [(schema.field_name(k), v) for k, v in text.lines(message)]
     common = _common_problems(values, sender_fio)
     name = text.value(values, NAME_KEY)
     if not name:
@@ -291,7 +293,7 @@ def read_batch(
 
 def known_lines(message: str | None) -> int:
     """Сколько строк сообщения узнано: ноль на непустом тексте — прислали не заявку."""
-    values = text.lines(message)
+    values = [(schema.field_name(k), v) for k, v in text.lines(message)]
     return sum(
         1
         for key in (
@@ -300,6 +302,8 @@ def known_lines(message: str | None) -> int:
             NAME_KEY,
             PROJECT_KEY,
             FIO_KEY,
+            schema.DIVISION,
+            schema.STATUS,
             schema.ACCOUNTING,
             schema.FIRST_USE,
             schema.SUMMARY,

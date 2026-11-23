@@ -118,7 +118,7 @@ async def test_admin_uses_own_card_when_target_fio_is_missing_or_empty(
 @pytest.mark.parametrize("sender", [ADMIN, OWNER])
 async def test_admin_can_register_a_book_without_a_fio_column(stand: Stand, sender: int) -> None:
     await stand.add("АБВГ.301121.001")
-    header = [column for column in schema.COLUMNS if column != schema.FIO]
+    header = [column for column in schema.LEGACY_COLUMNS if column != schema.FIO]
 
     def fill(sheet: Any) -> None:
         values = ["Кронштейн", "АБВГ.301121.ХХХ", "", "Машина", "", "", ""]

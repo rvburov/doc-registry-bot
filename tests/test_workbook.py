@@ -70,7 +70,7 @@ def test_blank_fio_cells_use_the_sender_in_an_allowed_message_book() -> None:
 
 @pytest.mark.parametrize("allow_other_fio", [False, True])
 def test_the_fio_column_is_not_required_in_a_message_book(allow_other_fio: bool) -> None:
-    header = [column for column in schema.COLUMNS if column != schema.FIO]
+    header = [column for column in schema.LEGACY_COLUMNS if column != schema.FIO]
 
     def fill(sheet: Any) -> None:
         values = ["Втулка", "АБВГ.301121.ХХХ", "", "Машина", "", "", ""]
@@ -88,7 +88,7 @@ def test_the_fio_column_is_not_required_in_a_message_book(allow_other_fio: bool)
 
 
 def test_columns_are_resolved_by_name_and_extra_columns_are_skipped() -> None:
-    header = [*reversed(schema.COLUMNS), "Своя колонка"]
+    header = [*reversed(schema.LEGACY_COLUMNS), "Своя колонка"]
 
     def fill(sheet: Any) -> None:
         values = [
@@ -114,7 +114,7 @@ def test_columns_are_resolved_by_name_and_extra_columns_are_skipped() -> None:
 
 
 def test_an_allowed_message_book_reads_the_fio_column_in_any_position() -> None:
-    header = ["Своя колонка", *reversed(schema.COLUMNS)]
+    header = ["Своя колонка", *reversed(schema.LEGACY_COLUMNS)]
 
     def fill(sheet: Any) -> None:
         values = {
@@ -126,7 +126,7 @@ def test_an_allowed_message_book_reads_the_fio_column_in_any_position() -> None:
             schema.SUMMARY: "Сталь",
         }
         for index, name in enumerate(header, start=1):
-            sheet.cell(row=4, column=index, value=values.get(name, ""))
+            sheet.cell(row=4, column=index, value=values.get(schema.field_name(name), ""))
 
     [row] = workbook.read_message_book(
         books.create_sheet(fill, header), "Список.xlsx", SENDER, allow_other_fio=True
@@ -142,7 +142,7 @@ def test_an_allowed_message_book_reads_the_fio_column_in_any_position() -> None:
 
 def test_duplicate_fio_headers_are_refused_when_the_column_is_read() -> None:
     data = books.create_sheet(
-        lambda sheet: books.fill(sheet, books.Row(2)), [*schema.COLUMNS, schema.FIO]
+        lambda sheet: books.fill(sheet, books.Row(2)), [*schema.LEGACY_COLUMNS, schema.FIO]
     )
     with pytest.raises(WorkbookError, match=r"ФИО регистрирующего.*несколько раз"):
         workbook.read_message_book(data, "Список.xlsx", SENDER, allow_other_fio=True)
@@ -162,9 +162,9 @@ def test_a_missing_or_duplicate_header_refuses_the_whole_book() -> None:
     def one(sheet: Any) -> None:
         books.fill(sheet, books.Row(2))
 
-    missing = books.create_sheet(one, schema.COLUMNS[:7])
-    duplicate = books.create_sheet(one, [*schema.COLUMNS, schema.PROJECT])
-    with pytest.raises(WorkbookError, match=r"Примечание \(краткая характеристика\)"):
+    missing = books.create_sheet(one, schema.LEGACY_COLUMNS[:7])
+    duplicate = books.create_sheet(one, [*schema.LEGACY_COLUMNS, schema.PROJECT])
+    with pytest.raises(WorkbookError, match=schema.SUMMARY):
         workbook.read_rows(missing, max_rows=None, sender_fio=None)
     with pytest.raises(WorkbookError, match="Проект"):
         workbook.read_message_book(duplicate, "Повтор.xlsx", SENDER)
@@ -270,7 +270,7 @@ def journal_table(extension: str, header: list[str], values: list[list[str]]) ->
 
 @pytest.mark.parametrize("extension", ["xlsx", "csv"])
 def test_journal_import_still_requires_the_fio_column(extension: str) -> None:
-    header = [column for column in schema.COLUMNS if column != schema.FIO]
+    header = [column for column in schema.LEGACY_COLUMNS if column != schema.FIO]
     data = journal_table(
         extension, header, [["Втулка", "АБВГ.301121.001", "10.11.2026", "Станок", "", "", ""]]
     )
@@ -284,7 +284,7 @@ def test_journal_import_keeps_fio_cells_and_dates_as_written(extension: str) -> 
         ["Втулка", "АБВГ.301121.001", "Петров Петр Петрович", "10.11.2026", "Станок", "", "", ""],
         ["Вал", "АБВГ.301121.002", "", "11.11.2026", "Станок", "", "", ""],
     ]
-    data = journal_table(extension, [*schema.COLUMNS], values)
+    data = journal_table(extension, [*schema.LEGACY_COLUMNS], values)
     rows = workbook.read_table(data, f"Журнал.{extension}")
     assert [row.fio for row in rows] == ["Петров Петр Петрович", ""]
     assert [row.date for row in rows] == ["10.11.2026", "11.11.2026"]
@@ -294,7 +294,7 @@ def test_journal_import_keeps_fio_cells_and_dates_as_written(extension: str) -> 
 def test_journal_import_still_refuses_duplicate_fio_headers(extension: str) -> None:
     data = journal_table(
         extension,
-        [*schema.COLUMNS, schema.FIO],
+        [*schema.LEGACY_COLUMNS, schema.FIO],
         [["Втулка", "АБВГ.301121.001", SENDER, "10.11.2026", "Станок", "", "", "", SENDER]],
     )
     with pytest.raises(WorkbookError, match=r"ФИО регистрирующего.*несколько раз"):

@@ -112,8 +112,8 @@ def test_filled_optional_values_are_shown_in_single_and_batch_cards() -> None:
     batch_card = registration._batch_card([row], "Зарегистрировано: 1 из 1.")
     for html in (card, batch_card):
         assert "Отметка учета: Учтен" in html
-        assert "Примечание (первичное применение): Изделие" in html
-        assert "Примечание (краткая характеристика): Сталь &amp; покрытие" in html
+        assert "Примечание первичное: Изделие" in html
+        assert "Примечание краткая характеристика: Сталь &amp; покрытие" in html
 
 
 def test_empty_optional_values_do_not_add_lines_to_previous_cards() -> None:
@@ -126,6 +126,8 @@ def test_empty_optional_values_do_not_add_lines_to_previous_cards() -> None:
         "Наименование: Втулка",
         "Проект: Станок",
         f"ФИО: {SENDER}",
+        "Подразделение регистрирующего: не указано",
+        "Актуальность: Зарегистрирован",
     ]
     row = registration.PlannedRow(1, "АБВГ.301121.001", "Втулка", "Станок", SENDER)
     batch_card = registration._batch_card([row], "Зарегистрировано: 1 из 1.")
@@ -135,6 +137,8 @@ def test_empty_optional_values_do_not_add_lines_to_previous_cards() -> None:
         "Наименование: Втулка",
         "Проект: Станок",
         f"ФИО: {SENDER}",
+        "Подразделение регистрирующего: не указано",
+        "Актуальность: Зарегистрирован",
     ]
 
 

@@ -60,6 +60,8 @@ class Ctx:
     tasks: list[Task] = field(default_factory=list)
     # Когда человек отправил сообщение (время сервера мессенджера); None — неизвестно.
     sent_at: datetime | None = None
+    sender_division: str = ""
+    contact_divisions: dict[str, str] | None = None
 
     def reply(self, html: str, files: list[Attachment] | None = None) -> None:
         self.replies.append(Reply(self.sender_id, html, files or []))

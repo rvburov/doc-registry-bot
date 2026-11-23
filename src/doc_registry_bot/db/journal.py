@@ -35,6 +35,7 @@ class NewEntry:
     first_use: str = ""
     summary: str = ""
     registrant_id: int | None = None
+    division: str = ""
 
 
 async def lock_series(session: AsyncSession, series: Sequence[str]) -> None:
@@ -76,6 +77,7 @@ async def add_entries(session: AsyncSession, entries: Sequence[NewEntry], now: d
                 series=series_of(entry.designation),
                 name=entry.name,
                 fio=entry.fio,
+                division=entry.division,
                 registered_at=now,
                 project=entry.project,
                 accounting=entry.accounting,

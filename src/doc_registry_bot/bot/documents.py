@@ -22,6 +22,7 @@ EDIT = "Изменение"
 CHOICES = "Регистрация, Просмотр, Удаление, Изменение"
 OPTIONAL = (schema.ACCOUNTING, schema.FIRST_USE, schema.SUMMARY)
 EDITABLE = ("Наименование", "Проект", *OPTIONAL)
+ADMIN_FIELDS = (message.FIO_KEY, schema.DIVISION, schema.STATUS)
 EMPTY = "не указано"
 
 
@@ -39,6 +40,8 @@ class Card:
     first_use: str
     summary: str
     version: int
+    division: str = ""
+    status: str = schema.REGISTERED
 
     def html(self, changed: tuple[str, ...] = ()) -> str:
         def show(value: str) -> str:
@@ -54,9 +57,11 @@ class Card:
                 f"Проект: {mark(self.project, 'Проект')}",
                 f"ФИО: {mark(self.fio, 'ФИО')}",
                 f"Дата регистрации: {show(self.date)}",
+                f"{schema.DIVISION}: {mark(self.division, schema.DIVISION)}",
+                f"{schema.STATUS}: {mark(self.status, schema.STATUS)}",
                 f"Отметка учета: {mark(self.accounting, schema.ACCOUNTING)}",
-                f"Примечание (первичное применение): {mark(self.first_use, schema.FIRST_USE)}",
-                f"Примечание (краткая характеристика): {mark(self.summary, schema.SUMMARY)}",
+                f"{schema.FIRST_USE}: {mark(self.first_use, schema.FIRST_USE)}",
+                f"{schema.SUMMARY}: {mark(self.summary, schema.SUMMARY)}",
             ]
         )
 
@@ -65,6 +70,8 @@ class Card:
             "Наименование": self.name,
             "Проект": self.project,
             "ФИО": self.fio,
+            schema.DIVISION: self.division,
+            schema.STATUS: self.status,
             schema.ACCOUNTING: self.accounting,
             schema.FIRST_USE: self.first_use,
             schema.SUMMARY: self.summary,
@@ -83,6 +90,8 @@ def card_of(ctx: Ctx, entry: JournalEntry) -> Card:
         entry.first_use,
         entry.summary,
         entry.version,
+        entry.division,
+        entry.status,
     )
 
 
@@ -97,6 +106,7 @@ async def run(
     ctx: Ctx, action: str, values: list[tuple[str, str]], *, allow_fio: bool = False
 ) -> None:
     """Просмотр, удаление или изменение. Ожидающая операция уже проверена вызывающим."""
+    values = [(schema.field_name(k), v) for k, v in values]
     problems: list[str] = []
     number_text = text.value(values, message.NUMBER_KEY)
     if "," in number_text:
@@ -137,6 +147,23 @@ async def run(
                     else:
                         changes[message.FIO_KEY] = fio
                 continue
+            protected = next(
+                (f for f in (schema.DIVISION, schema.STATUS) if text.same_name(f, field)), None
+            )
+            if protected is not None:
+                if not allow_fio:
+                    problems.append(f"{protected}: изменение доступно только администратору")
+                elif protected == schema.STATUS:
+                    status = schema.status(value)
+                    if status is None:
+                        problems.append(
+                            f"{protected}: допустимо только {', '.join(schema.STATUSES)}"
+                        )
+                    else:
+                        changes[protected] = status
+                else:
+                    changes[protected] = text.collapse(value)
+                continue
             editable = next((f for f in EDITABLE if text.same_name(f, field)), None)
             if editable is None:
                 problems.append(f"{field}: изменение этого поля не поддерживается")
@@ -145,7 +172,7 @@ async def run(
             else:
                 changes[editable] = value
         if not changes and not problems:
-            fields = (*EDITABLE, message.FIO_KEY) if allow_fio else EDITABLE
+            fields = (*EDITABLE, *ADMIN_FIELDS) if allow_fio else EDITABLE
             problems.append(f"Изменение: укажите хотя бы одно поле: {', '.join(fields)}")
     else:
         problems.extend(_extra_fields(action, values))
@@ -166,6 +193,8 @@ async def run(
         name=changes.get("Наименование", card.name),
         project=changes.get("Проект", card.project),
         fio=changes.get(message.FIO_KEY, card.fio),
+        division=changes.get(schema.DIVISION, card.division),
+        status=changes.get(schema.STATUS, card.status),
         accounting=changes.get(schema.ACCOUNTING, card.accounting),
         first_use=changes.get(schema.FIRST_USE, card.first_use),
         summary=changes.get(schema.SUMMARY, card.summary),
@@ -310,6 +339,10 @@ async def confirm(ctx: Ctx, kind: str, payload: dict[str, Any]) -> None:
         entry.project = changes["Проект"]
     if message.FIO_KEY in changes:
         entry.fio = changes[message.FIO_KEY]
+    if schema.DIVISION in changes:
+        entry.division = changes[schema.DIVISION]
+    if schema.STATUS in changes:
+        entry.status = changes[schema.STATUS]
     if schema.ACCOUNTING in changes:
         entry.accounting = changes[schema.ACCOUNTING]
     if schema.FIRST_USE in changes:

@@ -21,20 +21,31 @@ class Row:
     accounting: str = ""
     first_use: str = ""
     summary: str = ""
+    division: str = ""
+    status: str = schema.REGISTERED
 
 
 def fill(sheet: Any, row: Row) -> None:
-    values = [
-        row.name,
-        row.number,
-        row.fio,
-        "дата из файла не используется",
-        row.project,
-        row.accounting,
-        row.first_use,
-        row.summary,
-    ]
-    for index, value in enumerate(values, start=1):
+    values = dict(
+        zip(
+            schema.COLUMNS,
+            [
+                row.name,
+                row.number,
+                row.project,
+                "дата из файла не используется",
+                row.fio,
+                row.division,
+                row.status,
+                row.accounting,
+                row.first_use,
+                row.summary,
+            ],
+            strict=True,
+        )
+    )
+    for index in range(1, sheet.max_column + 1):
+        value = values.get(schema.field_name(str(sheet.cell(1, index).value)), "")
         if value:
             sheet.cell(row=row.line, column=index, value=value)
 

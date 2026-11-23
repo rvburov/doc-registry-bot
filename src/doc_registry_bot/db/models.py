@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Index,
     Integer,
@@ -22,7 +23,7 @@ class Base(DeclarativeBase):
 
 
 class JournalEntry(Base):
-    """Строка журнала КД: восемь столбцов журнала и служебные поля.
+    """Строка журнала КД: десять столбцов журнала и служебные поля.
 
     `designation_key` — обозначение, приведенное к одному виду (заглавные, похожая латиница
     русскими буквами). На нем уникальный индекс: один номер не может быть выдан дважды.
@@ -31,6 +32,9 @@ class JournalEntry(Base):
     """
 
     __tablename__ = "journal"
+    __table_args__ = (
+        CheckConstraint("status IN ('Зарегистрирован', 'Аннулирован')", name="ck_journal_status"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     designation: Mapped[str] = mapped_column(Text)
@@ -38,6 +42,10 @@ class JournalEntry(Base):
     series: Mapped[str] = mapped_column(Text, index=True)
     name: Mapped[str] = mapped_column(Text)
     fio: Mapped[str] = mapped_column(Text)
+    division: Mapped[str] = mapped_column(Text, default="", server_default="")
+    status: Mapped[str] = mapped_column(
+        Text, default="Зарегистрирован", server_default="Зарегистрирован"
+    )
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     project: Mapped[str] = mapped_column(Text)
     accounting: Mapped[str] = mapped_column(Text, default="", server_default="")

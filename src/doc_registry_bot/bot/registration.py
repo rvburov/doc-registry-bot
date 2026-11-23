@@ -10,6 +10,7 @@ from typing import Any
 
 from doc_registry_bot.bot import pending
 from doc_registry_bot.bot.context import Ctx
+from doc_registry_bot.bot.types import MessengerError
 from doc_registry_bot.db import journal
 from doc_registry_bot.registry import designation as d
 from doc_registry_bot.registry import eskd, markup, message, schema, text, workbook
@@ -32,6 +33,7 @@ class PlannedRow:
     accounting: str = ""
     first_use: str = ""
     summary: str = ""
+    division: str = ""
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,34 @@ class Series:
     org: str
     eskd: str
     values: list[str]
+
+
+async def division_of(
+    ctx: Ctx, fio: str, values: list[tuple[str, str]], allow_other: bool
+) -> str | None:
+    """Подразделение из карточки; администратор может задать его явно.
+
+    При регистрации за другого человека не подставляем отдел администратора. Если среди
+    контактов нет однозначной карточки, оставляем пусто: ФИО не является уникальным ID.
+    """
+    if allow_other:
+        supplied = [value for key, value in values if text.same_name(key, schema.DIVISION)]
+        if supplied and text.collapse(supplied[-1]):
+            return text.collapse(supplied[-1])
+    if text.same_name(fio, ctx.sender_fio):
+        return ctx.sender_division
+    if ctx.contact_divisions is None:
+        try:
+            cards = await ctx.messenger.contacts()
+        except MessengerError:
+            refused(ctx, "Мессенджер: не удалось получить подразделение. Повторите запрос позже")
+            return None
+        divisions: dict[str, str] = {}
+        for card in cards:
+            key = text.fold(text.collapse(card.fio))
+            divisions[key] = "" if key in divisions else text.collapse(card.division)
+        ctx.contact_divisions = divisions
+    return ctx.contact_divisions.get(text.fold(text.collapse(fio)), "")
 
 
 # ── Ответы ────────────────────────────────────────────────────────────────────
@@ -76,6 +106,8 @@ def registered_card(designation: str, request: RegistrationRequest, heading: str
             f"{message.NAME_KEY}: {escape(request.name)}",
             f"{message.PROJECT_KEY}: {escape(request.project)}",
             f"{message.FIO_KEY}: {escape(request.fio)}",
+            f"{schema.DIVISION}: {escape(request.division) or 'не указано'}",
+            f"{schema.STATUS}: {schema.REGISTERED}",
             *(f"{field}: {escape(value)}" for field, value in _optional_fields(request)),
         ]
     )
@@ -124,12 +156,15 @@ def _batch_card(rows: list[PlannedRow], heading: str) -> str:
         + "\n".join(f"{row.line}. {bold(escape(row.designation))}" for row in rows)
         + f"\nНаименование: {escape(first.name)}\nПроект: {escape(first.project)}"
         + f"\nФИО: {escape(first.fio)}"
+        + f"\n{schema.DIVISION}: {escape(first.division) or 'не указано'}"
+        + f"\n{schema.STATUS}: {schema.REGISTERED}"
         + "".join(f"\n{field}: {escape(value)}" for field, value in _optional_fields(first))
     )
 
 
 def _file_card(file_name: str, rows: list[PlannedRow], heading: str) -> str:
     different_fio = len({row.fio for row in rows}) > 1
+    divisions = len({row.division for row in rows}) > 1
     fio = (
         "ФИО регистрирующих указаны по строкам"
         if different_fio
@@ -141,10 +176,17 @@ def _file_card(file_name: str, rows: list[PlannedRow], heading: str) -> str:
         + escape(file_name)
         + "\n"
         + fio
+        + f"\n{schema.STATUS}: {schema.REGISTERED}"
+        + (
+            "\nПодразделения указаны по строкам"
+            if divisions
+            else f"\n{schema.DIVISION}: {escape(rows[0].division) or 'не указано'}"
+        )
         + "\n"
         + "\n".join(
             f"Строка {row.line}: {bold(escape(row.designation))}"
             + (f", ФИО: {escape(row.fio)}" if different_fio else "")
+            + (f", подразделение: {escape(row.division) or 'не указано'}" if divisions else "")
             for row in rows
         )
     )
@@ -191,6 +233,7 @@ async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str =
                 designation=row.designation,
                 name=row.name,
                 fio=row.fio,
+                division=row.division,
                 project=row.project,
                 accounting=row.accounting,
                 first_use=row.first_use,
@@ -205,7 +248,8 @@ async def _write(ctx: Ctx, rows: list[PlannedRow], source: str, file_name: str =
     for row in rows:
         details = (
             f"{row.designation}; наименование: {row.name}; проект: {row.project}; "
-            f"ФИО в журнале: {row.fio}; способ: {source}"
+            f"ФИО в журнале: {row.fio}; подразделение: {row.division or 'не указано'}; "
+            f"актуальность: {schema.REGISTERED}; способ: {source}"
         )
         if file_name:
             details += f"; файл: {file_name}; строка: {row.line}"
@@ -222,7 +266,9 @@ def _payload(
     return {
         "rows": [asdict(row) for row in kind_rows],
         "series": [asdict(item) for item in series],
-        "requires_admin": any(row.fio != ctx.sender_fio for row in kind_rows),
+        "requires_admin": any(
+            row.fio != ctx.sender_fio or row.division != ctx.sender_division for row in kind_rows
+        ),
         **extra,
     }
 
@@ -253,6 +299,7 @@ async def register(ctx: Ctx, request: RegistrationRequest) -> None:
         request.accounting,
         request.first_use,
         request.summary,
+        request.division,
     )
     if not series.values:
         # Пустая серия — любой первый документ или исполнение: просим подтверждения.
@@ -315,6 +362,7 @@ async def register_batch(ctx: Ctx, batch: BatchRead) -> None:
                 request.accounting,
                 request.first_use,
                 request.summary,
+                request.division,
             )
         )
         statuses.append(prefix + _status(by_series[(request.org, request.eskd)]))
@@ -367,12 +415,20 @@ async def register_file(
             ],
             ctx.orgs,
         )
-        items.append((row, request, problems))
-    snapshots = await _snapshots(ctx, [(r.org, r.eskd) for _, r, _ in items if r is not None])
+        division = await division_of(
+            ctx,
+            row.fio,
+            [(schema.DIVISION, row.division)] if row.division else [],
+            allow_other_fio,
+        )
+        if division is None:
+            return
+        items.append((row, request, problems, division))
+    snapshots = await _snapshots(ctx, [(r.org, r.eskd) for _, r, _, _ in items if r is not None])
     occupied = {(s.org, s.eskd): list(s.values) for s in snapshots}
     rows: list[PlannedRow] = []
     problems_all: list[str] = []
-    for row, request, problems in items:
+    for row, request, problems, division in items:
         prefix = f"Строка {row.line}: {row.designation or EMPTY_NUMBER}: "
         if request is None or problems:
             problems_all.append(prefix + "; ".join(problems))
@@ -393,6 +449,7 @@ async def register_file(
                 row.accounting,
                 row.first_use,
                 row.summary,
+                division,
             )
         )
     if problems_all:

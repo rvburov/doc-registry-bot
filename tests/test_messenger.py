@@ -87,6 +87,7 @@ async def test_cards_and_contacts_are_read() -> None:
     reader = messenger(service)
     card = await reader.user_card(1001)
     assert card is not None and card.fio == "Иванов Иван Иванович"
+    assert card.division == "ОГК"
     assert await reader.user_card(42) is None
     [contact] = await reader.contacts()
     assert contact.division == "ОГК"
